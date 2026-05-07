@@ -869,28 +869,16 @@
     container.innerHTML = `
       <div class="etf-group" style="margin-top:8px">
         <div class="etf-group-header">
-          <input type="checkbox" class="etf-group-all" id="grp-research" checked>
-          <label class="etf-group-label" for="grp-research" style="color:var(--purple)">Research Stocks</label>
+          <label class="etf-group-label" style="color:var(--purple)">Research Stocks</label>
         </div>
         <div class="etf-group-checks">
           ${stocks.map(t => `
             <div class="research-stock-row">
-              <label class="cb-label" style="border-color:#a371f744;padding:5px 10px">
-                <input type="checkbox" class="research-check" value="${t}" checked>
-              </label>
               <span class="research-ticker-link" onclick="openNewsModal('${t}')">${t}</span>
               <button class="research-remove" onclick="removeFromResearch('${t}')" title="Remove">✕</button>
             </div>`).join('')}
         </div>
       </div>`;
-    const groupCb = document.getElementById('grp-research');
-    const members = container.querySelectorAll('input.research-check');
-    groupCb.addEventListener('change', () => members.forEach(cb => cb.checked = groupCb.checked));
-    members.forEach(cb => cb.addEventListener('change', () => {
-      const n = members.length, checked = Array.from(members).filter(c => c.checked).length;
-      groupCb.indeterminate = checked > 0 && checked < n;
-      groupCb.checked = checked === n;
-    }));
   }
 
   // ── Start scan ────────────────────────────────────────────────────
@@ -899,7 +887,7 @@
     const universes = Array.from(document.querySelectorAll('input.etf-check:checked')).map(el => el.value);
     if (universes.length === 0) { alert('Select at least one portfolio.'); return; }
 
-    const research = Array.from(document.querySelectorAll('input.research-check:checked')).map(el => el.value);
+    const research = getResearch();
     const params = {
       universes,
       research_stocks: research,
