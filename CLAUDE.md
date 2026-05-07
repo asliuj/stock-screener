@@ -196,11 +196,16 @@ International tickers require special handling for Yahoo Finance:
 | RSI Max | 70 | 14-period RSI |
 
 Screening is two-pass:
-1. **Pass 1** — RSI + volume filter using a batch `yf.download()` (50 tickers per batch, 1s delay between batches)
-2. **Pass 2** — P/E lookup for survivors only, parallelised via `ThreadPoolExecutor(max_workers=10)`
+1. **Pass 1** — RSI + volume filter using a batch `yf.download()` (**25 tickers per batch**, **2s delay** between batches)
+2. **Pass 2** — P/E lookup for survivors only, parallelised via `ThreadPoolExecutor(max_workers=5)`
 
 **Important — yfinance batch download behaviour (v0.2.40+):**
-`yf.download()` with `group_by="ticker"` always returns a MultiIndex DataFrame, even for a single-ticker batch. The `_get_df()` helper therefore always slices via `data[ticker].copy()` regardless of batch size — the old `len(tickers) == 1` shortcut was removed because it left the MultiIndex intact and caused `dropna()` to silently fail.
+`yf.download()` with `group_by="ticker"` always returns a MultiIndex DataFrame, even for a single-ticker batch. `screen_batch()` builds a `ticker_data: dict[str, DataFrame]` from the download result and looks up each ticker via `ticker_data.get(ticker)` — never `data.copy()` — to avoid MultiIndex leaking into downstream column lookups.
+
+**Fallback data sources (rate-limit resilience):**
+- **Price history**: if `_yf_download()` raises after all retries, `screen_batch()` falls back to fetching each ticker individually from **Stooq** (`stooq.com/q/d/l/?s={sym}.us`) — same OHLCV CSV, no key required
+- **P/E ratio**: `fetch_pe()` tries yfinance first; if that fails, falls back to the **CNBC free quote API** (`quote.cnbc.com/quote-html-webservice/quote.htm`) which returns PE directly in JSON
+- `_yf_download()` has exponential-backoff retry (10s / 20s / 40s) before raising
 
 **On quiet market days (low overall volume):**
 The 2× volume ratio default is calibrated for genuine volume spikes. On low-activity days the screener legitimately returns 0 results — this is not a bug. Users should lower the Volume Ratio slider to 1.2–1.5× if they want results on quiet days.
@@ -212,9 +217,9 @@ The 2× volume ratio default is calibrated for genuine volume spikes. On low-act
 - Holdings cache uses `.clear()/.update()` (in-place mutation) to avoid `global` reassignment
 - ETF performance cache (`_perf_state`) uses a 5-minute TTL; lock released before the blocking fetch
 - `TEMPLATES_AUTO_RELOAD = True` so Flask serves updated HTML without restart during development
-- The frontend collects selected ETFs via `querySelectorAll('input.etf-check:checked')` — adding a new ETF only requires one line of HTML
+- ETF checkboxes are **generated dynamically in JS** from the `ETF_GROUPS` array — adding a new ETF only requires adding it to `ETF_GROUPS` in `index.html`
 - Each result row shows ETF badge(s) built from a reverse ticker→ETF map constructed at scan time
-- `_get_df()` is a closure inside `screen_batch()` that slices a single ticker out of the batch download result; it must always use `data[ticker]` — never `data.copy()` — to avoid MultiIndex leaking into downstream column lookups
+- `screen_batch()` stores per-ticker DataFrames in `ticker_data: dict[str, DataFrame]`; lookups use `ticker_data.get(ticker)` directly — no `_get_df` closure needed
 
 ### Holdings API split
 `GET /api/holdings` returns lightweight status only (`{status, updated, message, counts, fresh_fetch}`) — safe to poll every 2s.
@@ -225,12 +230,25 @@ Shared parser for SSGA and iShares DataFrames. Extracts tickers, weights, and na
 - **Critical**: ticker values are extracted via `[str(v).strip() for v in df[tcol]]` (Python list comprehension), NOT `df[tcol].astype(str)`. Newer pandas StringDtype columns leave `pd.NA` as a float-like NaN object rather than the string `"nan"`, which causes `AttributeError: 'float' has no attribute 'startswith'` on the Cash-filter check. Python's `str()` always returns a real string.
 - Invalid tickers are filtered via `_INVALID_TICKER = frozenset(("", "-", "nan", "<NA>", "None"))`.
 
+### stockanalysis.com weight supplementation
+`_fetch_stockanalysis(sym_lower)` returns `(tickers, weights)`. For SSGA, iShares, and Vanguard sources, if the primary source returns no weights, `_fetch_stockanalysis(sym_lower)[1]` is used as a fallback weight supplement (top ~25 free tier). QQQ (Wikipedia) and NATO always use stockanalysis.com for weights.
+
 ### Browse All Holdings modal
 Opened via the "Browse All Holdings" button in the header. Shows all constituent stocks from selected ETFs with:
 - ETF badge(s) with fund weight % (e.g. "VGT 18.53%") — sorted by highest fund weight first
 - Current price + ▲/▼ daily change % (fetched async via `POST /api/prices`)
 - MA20 and MA50 (same async fetch, requires `period="3mo"` to have enough data)
 - Company name
+- **% change filter row**: preset buttons (All, Gainers, >5%/>10%/>15%, Losers, >5%/>10%/>15%) plus custom Min/Max inputs
+- **Stocks with no price data are hidden** once prices finish loading
+- **📰 News button** on each card opens the News modal
+- **+ Portfolio button** adds the stock to the Research Stocks group (localStorage-backed)
+
+### Research Stocks group
+Stocks added via "Browse All Holdings" are saved to `localStorage` under key `screener_research_stocks`. They appear as a "Research Stocks" group in the Portfolio panel, are passed to `/api/run` as `research_stocks`, and get tagged "Research" in the results ETF badge column. They bypass the ETF holdings lookup — added directly to the screening universe.
+
+### News modal
+Opened via the 📰 News button on browse cards. Fetches `/api/news/<ticker>`, which uses yfinance news (handles both old and new yfinance response formats). Footer has 5 external links: Yahoo Finance, Stock Analysis, Seeking Alpha, MarketWatch, CNBC.
 
 ### ETF Holdings Report modal
 Opened via "View ETF Holdings" button. Shows each ETF row with:
@@ -252,3 +270,9 @@ python app.py
 ```powershell
 netstat -ano | findstr ":8080" | ForEach-Object { ($_ -split '\s+')[-1] } | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 ```
+
+## GitHub Backup
+- Repo: `https://github.com/asliuj/stock-screener` (private)
+- **Hourly auto-backup**: `backup.ps1` runs via Windows Task Scheduler task `StockScreenerGitBackup` every hour at :13 — commits and pushes any modified tracked files, logs to `backup.log`
+- `holdings_cache.json` and `backup.log` are in `.gitignore` (not committed)
+- To manage the task: `Get-ScheduledTask -TaskName StockScreenerGitBackup` / `Unregister-ScheduledTask -TaskName StockScreenerGitBackup`
