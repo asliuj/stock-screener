@@ -245,10 +245,20 @@ Opened via the "Browse All Holdings" button in the header. Shows all constituent
 - **+ Portfolio button** adds the stock to the Research Stocks group (localStorage-backed)
 
 ### Research Stocks group
-Stocks added via "Browse All Holdings" are saved to `localStorage` under key `screener_research_stocks`. They appear as a "Research Stocks" group in the Portfolio panel, are passed to `/api/run` as `research_stocks`, and get tagged "Research" in the results ETF badge column. They bypass the ETF holdings lookup — added directly to the screening universe.
+Stocks added via "Browse All Holdings" are saved to `localStorage` under key `screener_research_stocks`. They appear as a "Research Stocks" group in the Portfolio panel with no checkboxes — all research stocks are **always included** in every scan, passed to `/api/run` as `research_stocks`, and tagged "Research" in the results ETF badge column. They bypass the ETF holdings lookup — added directly to the screening universe.
+- Each stock shows as a clickable blue ticker link (opens News+Price popup) and a ✕ remove button
+- No group or individual checkboxes — `startScan()` uses `getResearch()` directly
 
-### News modal
-Opened via the 📰 News button on browse cards. Fetches `/api/news/<ticker>`, which uses yfinance news (handles both old and new yfinance response formats). Footer has 5 external links: Yahoo Finance, Stock Analysis, Seeking Alpha, MarketWatch, CNBC.
+### News + Price popup (modal)
+Triggered by: clicking a ticker in Top Results, clicking a research stock ticker, or the 📰 News button on browse cards.
+- Fetches `/api/news/<ticker>` and `POST /api/prices` **in parallel**
+- **Price bar** at top (if price available): current price, ▲/▼ % change + dollar change (color-coded), MA20, MA50
+- Article list below with publisher + date
+- Footer: 5 external links — Yahoo Finance, Stock Analysis, Seeking Alpha, MarketWatch, CNBC
+- Handles both old and new yfinance news response formats
+
+### Top Results table
+Each ticker in the results table is a **clickable blue link** — clicking opens the News+Price popup for that stock. Styled with `.ticker-sym:hover { text-decoration: underline }`.
 
 ### ETF Holdings Report modal
 Opened via "View ETF Holdings" button. Shows each ETF row with:
