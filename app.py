@@ -762,18 +762,32 @@ def api_extended(ticker):
     try:
         tkr  = yf.Ticker(ticker)
         fi   = tkr.fast_info
-        last = _safe_val(getattr(fi, "last_price", None)) or 0
 
-        for key, attr in (("post_market", "post_market_price"), ("pre_market", "pre_market_price")):
+        # Fetch info once — used for both after-hours prices and analyst consensus
+        try:
+            info = tkr.info or {}
+        except Exception:
+            info = {}
+
+        last = (_safe_val(getattr(fi, "last_price", None))
+                or _safe_val(info.get("regularMarketPrice")) or 0)
+
+        # After-hours / pre-market: fast_info attrs first, then info dict fallback
+        for key, fi_attr, info_key in (
+            ("post_market", "post_market_price", "postMarketPrice"),
+            ("pre_market",  "pre_market_price",  "preMarketPrice"),
+        ):
             try:
-                price = _safe_val(getattr(fi, attr, None))
-                if price and price != last:
-                    change = round(price - last, 2) if last else None
-                    pct    = round((price - last) / last * 100, 2) if last else None
-                    out[key] = {"price": price, "change": change, "pct": pct}
+                price = (_safe_val(getattr(fi, fi_attr, None))
+                         or _safe_val(info.get(info_key)))
+                if price and last and abs(price - last) > 0.001:
+                    change = round(price - last, 2)
+                    out[key] = {"price": price, "change": change,
+                                "pct": round(change / last * 100, 2)}
             except Exception:
                 pass
 
+        # Earnings calendar
         try:
             cal = tkr.calendar
             if cal:
@@ -796,21 +810,21 @@ def api_extended(ticker):
         except Exception:
             pass
 
-        try:
-            info = tkr.info
-            if info:
-                rec = (info.get("recommendationKey") or "").replace("_", " ").title()
-                out["analyst"] = {
-                    "target_mean":  _safe_val(info.get("targetMeanPrice")),
-                    "target_low":   _safe_val(info.get("targetLowPrice")),
-                    "target_high":  _safe_val(info.get("targetHighPrice")),
-                    "rec":          rec or None,
-                    "n":            info.get("numberOfAnalystOpinions"),
-                    "current":      _safe_val(info.get("currentPrice")),
-                }
-        except Exception:
-            pass
+        # Analyst consensus — reuse info already fetched above
+        if info:
+            rec = (info.get("recommendationKey") or "").replace("_", " ").title()
+            analyst = {
+                "target_mean":  _safe_val(info.get("targetMeanPrice")),
+                "target_low":   _safe_val(info.get("targetLowPrice")),
+                "target_high":  _safe_val(info.get("targetHighPrice")),
+                "rec":          rec or None,
+                "n":            info.get("numberOfAnalystOpinions"),
+                "current":      _safe_val(info.get("currentPrice")) or (last if last else None),
+            }
+            if any(v for v in analyst.values()):
+                out["analyst"] = analyst
 
+        # Analyst upgrades / downgrades
         try:
             ud = tkr.upgrades_downgrades
             if ud is not None and not ud.empty:
