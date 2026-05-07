@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NASDAQ + S&P 500 + SCHB Stock Screener</title>
+  <style>
+    /* ── Reset & Base ───────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --surface2:  #1c2128;
+      --border:    #30363d;
+      --accent:    #238636;
+      --accent-h:  #2ea043;
+      --blue:      #1f6feb;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --danger:    #da3633;
+      --warn:      #d29922;
+      --green:     #3fb950;
+      --purple:    #a371f7;
+      --radius:    8px;
+      --shadow:    0 4px 24px rgba(0,0,0,.5);
+    }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 32px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-center { display: flex; justify-content: center; }
+    .header-btn {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 9px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      transition: border-color .15s, background .15s;
+    }
+    .header-btn:hover { border-color: var(--blue); background: var(--surface); }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    .logo-icon { font-size: 24px; }
+    .header-right {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 16px;
+    }
+    #last-run {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* ── Main ───────────────────────────────────────────────────────── */
+    main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+
+    /* ── Run Button ─────────────────────────────────────────────────── */
+    #run-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      padding: 10px 22px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background .15s, transform .1s;
+    }
+    #run-btn:hover:not(:disabled) { background: var(--accent-h); }
+    #run-btn:active:not(:disabled) { transform: scale(.97); }
+    #run-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+    /* ── Status Bar ─────────────────────────────────────────────────── */
+    #status-bar {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      min-height: 60px;
+    }
+    #status-icon { font-size: 22px; }
+    .status-info { flex: 1; }
+    #status-msg  { font-size: 14px; color: var(--text); }
+    #status-sub  { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+    /* ── Progress bar ───────────────────────────────────────────────── */
+    .progress-wrap {
+      flex: 1; height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    #progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--blue), var(--purple));
+      border-radius: 3px;
+      transition: width .4s ease;
+      width: 0%;
+    }
+
+    /* ── Stats Row ──────────────────────────────────────────────────── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+    }
+    .stat-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .stat-value { font-size: 28px; font-weight: 700; }
+    .stat-value.green  { color: var(--green); }
+    .stat-value.blue   { color: var(--blue); }
+    .stat-value.purple { color: var(--purple); }
+    .stat-value.warn   { color: var(--warn); }
+
+    /* ── Table ──────────────────────────────────────────────────────── */
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .table-header {
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+    }
+    .table-title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .table-count {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 3px 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    thead th {
+      background: var(--surface2);
+      padding: 12px 16px;
+      text-align: left;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    thead th.right { text-align: right; }
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background .12s;
+    }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--surface2); }
+    td { padding: 14px 16px; vertical-align: middle; }
+    td.right { text-align: right; }
+
+    /* Rank */
+    .rank {
+      width: 28px; height: 28px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    tr:nth-child(1) .rank { background: #ffd70022; border-color: #ffd700; color: #ffd700; }
+    tr:nth-child(2) .rank { background: #c0c0c022; border-color: #c0c0c0; color: #c0c0c0; }
+    tr:nth-child(3) .rank { background: #cd7f3222; border-color: #cd7f32; color: #cd7f32; }
+
+    /* Ticker */
+    .ticker-cell { display: flex; align-items: center; gap: 10px; }
+    .ticker-sym {
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--blue);
+      letter-spacing: .3px;
+    }
+
+    /* Pill meters */
+    .meter {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 90px;
+    }
+    .meter-bar-bg {
+      width: 60px; height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .meter-bar { height: 100%; border-radius: 3px; transition: width .3s; }
+    .bar-rsi   { background: linear-gradient(90deg, #1f6feb, #a371f7); }
+    .bar-vol   { background: linear-gradient(90deg, #d29922, #f78166); }
+    .meter-val { font-weight: 600; font-size: 13px; min-width: 36px; }
+
+    /* PE chip */
+    .pe-chip {
+      display: inline-block;
+      background: #2386361a;
+      border: 1px solid #23863640;
+      border-radius: 20px;
+      padding: 3px 10px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--green);
+    }
+
+    /* Price */
+    .price-val { font-weight: 600; font-size: 15px; }
+
+    /* ── Empty / Loading State ──────────────────────────────────────── */
+    #empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+    }
+    #empty-state .empty-icon { font-size: 48px; margin-bottom: 16px; }
+    #empty-state h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
+    #empty-state p  { font-size: 14px; }
+
+    /* ── Spinner ────────────────────────────────────────────────────── */
+    .spinner {
+      display: inline-block;
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Pulse dot (live indicator) ─────────────────────────────────── */
+    .pulse {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      display: inline-block;
+      box-shadow: 0 0 0 0 rgba(63,185,80,.5);
+      animation: pulse 1.6s infinite;
+    }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0   rgba(63,185,80,.6); }
+      70%  { box-shadow: 0 0 0 8px rgba(63,185,80,0); }
+      100% { box-shadow: 0 0 0 0   rgba(63,185,80,0); }
+    }
+
+    /* ── ETF badges in results table ───────────────────────────────── */
+    .etf-badge {
+      display: inline-block;
+      background: #1f6feb22;
+      border: 1px solid #1f6feb55;
+      border-radius: 12px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--blue);
+      white-space: nowrap;
+      cursor: default;
+      margin: 1px 2px 1px 0;
+    }
+
+    /* ── Controls Panel ────────────────────────────────────────────── */
+    .controls-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+      align-items: flex-end;
+    }
+    .control-group { display: flex; flex-direction: column; gap: 8px; }
+    .control-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .ctrl-input {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 8px 12px;
+      width: 90px;
+      outline: none;
+      transition: border-color .15s;
+    }
+    .ctrl-input:focus { border-color: var(--blue); }
+    .checkbox-group { display: flex; gap: 12px; flex-wrap: wrap; }
+    .cb-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 7px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      transition: border-color .15s;
+      user-select: none;
+    }
+    .cb-label:hover { border-color: var(--blue); }
+    .cb-label input[type=checkbox] { accent-color: var(--blue); width: 14px; height: 14px; cursor: pointer; }
+    .etf-groups { display: flex; flex-wrap: wrap; gap: 12px; }
+    .etf-group { display: flex; flex-direction: column; gap: 6px; }
+    .etf-group-header { display: flex; align-items: center; gap: 6px; }
+    .etf-group-all { accent-color: var(--blue); width: 13px; height: 13px; cursor: pointer; flex-shrink: 0; }
+    .etf-group-label { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; cursor: pointer; user-select: none; }
+    .etf-group-checks { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* ── Holdings Modal ─────────────────────────────────────────────── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.7);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      width: min(1400px, 97vw);
+      max-height: 90vh;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .modal-header {
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .modal-title { font-size: 16px; font-weight: 700; }
+    .modal-close {
+      background: none; border: none; color: var(--muted);
+      font-size: 20px; cursor: pointer; line-height: 1;
+      padding: 2px 6px; border-radius: 4px;
+    }
+    .modal-close:hover { background: var(--surface2); color: var(--text); }
+    .modal-body { padding: 20px 24px; overflow-y: auto; }
+    .modal-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+    .modal-table th {
+      background: var(--surface2); padding: 8px 12px;
+      text-align: left; font-size: 11px; font-weight: 600;
+      color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-table th.col-etf    { width: 65px; }
+    .modal-table th.col-name   { width: 200px; }
+    .modal-table th.col-ytd    { width: 75px; text-align: right; }
+    .modal-table th.col-today  { width: 110px; text-align: right; }
+    .modal-table th.col-count  { width: 55px; text-align: right; }
+    .modal-table th.col-tickers { }
+    .modal-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .modal-table tr:last-child td { border-bottom: none; }
+    .modal-table tr:hover td { background: var(--surface2); }
+    .modal-etf { font-weight: 700; color: var(--blue); white-space: nowrap; }
+    .modal-tickers {
+      color: var(--muted); font-size: 11px; line-height: 1.7;
+      word-break: break-word; overflow-wrap: anywhere;
+    }
+    .modal-tickers a, .modal-etf a {
+      color: inherit;
+      text-decoration: none;
+    }
+    .modal-tickers a:hover { color: var(--blue); text-decoration: underline; }
+    .modal-etf a:hover     { text-decoration: underline; }
+    .modal-footer {
+      padding: 14px 24px;
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end;
+    }
+    .modal-footer button {
+      background: var(--accent); color: #fff; border: none;
+      border-radius: var(--radius); padding: 8px 20px;
+      font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .modal-footer button:hover { background: var(--accent-h); }
+
+    /* ── Browse Holdings Modal ──────────────────────────────────────── */
+    #browse-modal .modal { width: min(900px, 97vw); }
+    .browse-search-wrap {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 16px;
+    }
+    #browse-search {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 14px;
+      padding: 8px 12px;
+      outline: none;
+    }
+    #browse-search:focus { border-color: var(--blue); }
+    #browse-count-label { font-size: 13px; color: var(--muted); white-space: nowrap; }
+    .browse-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 6px;
+    }
+    .browse-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    .browse-card-ticker {
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--blue);
+      margin-bottom: 4px;
+    }
+    .browse-card-ticker a {
+      color: inherit;
+      text-decoration: none;
+    }
+    .browse-card-ticker a:hover { text-decoration: underline; }
+    .browse-card-etfs { display: flex; flex-wrap: wrap; gap: 3px; }
+    #browse-empty { text-align:center; padding:40px; color:var(--muted); font-size:14px; display:none; }
+    .browse-card-btn {
+      margin-top: 6px;
+      padding: 3px 9px;
+      font-size: 11px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+      color: var(--muted);
+    }
+    .browse-card-btn:hover { border-color: var(--blue); color: var(--blue); }
+    .browse-card-btn.added { border-color: var(--green); color: var(--green); }
+    .browse-card-buttons { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+    .research-stock-row { display: flex; align-items: center; gap: 3px; }
+    .research-remove {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: 11px; padding: 0 2px; line-height: 1;
+    }
+    .research-remove:hover { color: var(--danger); }
+
+    /* ── News modal ──────────────────────────────────────────────────── */
+    .news-list {
+      list-style: none;
+      margin: 8px 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .news-list li {
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .news-list li:last-child { border-bottom: none; }
+    .news-title a {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      text-decoration: none;
+      line-height: 1.4;
+    }
+    .news-title a:hover { color: var(--blue); text-decoration: underline; }
+    .news-meta {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+    .news-sa-link {
+      color: var(--blue);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .news-sa-link:hover { text-decoration: underline; }
+
+    /* ── Footer ─────────────────────────────────────────────────────── */
+    footer {
+      text-align: center;
+      padding: 24px;
+      color: var(--muted);
+      font-size: 12px;
+      border-top: 1px solid var(--border);
+      margin-top: 48px;
+    }
+
+    /* ── Responsive ─────────────────────────────────────────────────── */
+    @media (max-width: 700px) {
+      header { padding: 14px 16px; }
+      main   { padding: 20px 12px; }
+      .logo  { font-size: 16px; }
+      table  { font-size: 12px; }
+      td, thead th { padding: 10px 10px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── HEADER ──────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <span class="logo-icon">📈</span>
+    ETF Stock Screener
+  </div>
+  <div class="header-center">
+    <button id="holdings-btn" class="header-btn" onclick="openHoldingsReport()">
+      📋 View ETF Holdings
+    </button>
+  </div>
+  <div class="header-right">
+    <span id="last-run">Not yet run</span>
+    <button id="browse-btn" class="header-btn" onclick="openBrowseModal()">
+      🗂 Browse All Holdings
+    </button>
+    <button id="run-btn" onclick="startScan()">
+      <span id="btn-icon">▶</span>
+      <span id="btn-label">Run Scan</span>
+    </button>
+  </div>
+</header>
+
+<!-- ── MAIN ────────────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Holdings status bar -->
+  <div id="holdings-bar" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 20px;margin-bottom:16px;display:flex;align-items:center;gap:12px;font-size:13px;">
+    <span id="holdings-icon">⏳</span>
+    <span id="holdings-msg" style="flex:1;color:var(--muted);">Checking ETF holdings cache…</span>
+    <span id="holdings-updated" style="color:var(--muted);font-size:12px;"></span>
+  </div>
+
+  <!-- Controls panel -->
+  <div class="controls-panel">
+    <div class="control-group">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <div class="control-label" style="margin-bottom:0">Portfolio</div>
+        <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:pointer;user-select:none;">
+          <input type="checkbox" id="cb-select-all" checked onchange="toggleAllEtfs(this.checked)">
+          Select All
+        </label>
+      </div>
+      <div class="etf-groups" id="etf-groups-container"></div>
+      <div id="research-group-container"></div>
+    </div>
+    <div class="control-group">
+      <label class="control-label" for="inp-pe">P/E Max</label>
+      <input type="number" id="inp-pe" class="ctrl-input" value="30" min="1" max="500" step="1">
+    </div>
+    <div class="control-group">
+      <label class="control-label" for="inp-rsi">RSI Min</label>
+      <input type="number" id="inp-rsi" class="ctrl-input" value="50" min="1" max="99" step="1">
+    </div>
+    <div class="control-group">
+      <label class="control-label" for="inp-rsi-max">RSI Max</label>
+      <input type="number" id="inp-rsi-max" class="ctrl-input" value="70" min="2" max="100" step="1">
+    </div>
+    <div class="control-group">
+      <label class="control-label" for="inp-vol">Volume Ratio Min</label>
+      <input type="number" id="inp-vol" class="ctrl-input" value="2.0" min="1" max="10" step="0.1">
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div id="status-bar">
+    <span id="status-icon">💤</span>
+    <div class="status-info">
+      <div id="status-msg">Ready — click "Run Scan" to screen selected ETF holdings</div>
+      <div id="status-sub"></div>
+    </div>
+    <div class="progress-wrap" id="progress-wrap" style="display:none">
+      <div id="progress-fill"></div>
+    </div>
+  </div>
+
+  <!-- Stats row -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">Universe</div>
+      <div class="stat-value blue" id="stat-universe">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Screened</div>
+      <div class="stat-value purple" id="stat-screened">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Passed Filters</div>
+      <div class="stat-value warn" id="stat-passed">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Showing</div>
+      <div class="stat-value green" id="stat-showing">—</div>
+    </div>
+  </div>
+
+  <!-- Results table -->
+  <div class="table-wrap">
+    <div class="table-header">
+      <span class="table-title">
+        <span id="live-dot" style="display:none" class="pulse"></span>
+        Top Results
+      </span>
+      <span class="table-count" id="result-count">0 stocks</span>
+    </div>
+
+    <div id="empty-state">
+      <div class="empty-icon">🔍</div>
+      <h3>No results yet</h3>
+      <p>Click <strong>Run Scan</strong> to screen selected ETF holdings against all filters.</p>
+    </div>
+
+    <table id="results-table" style="display:none">
+      <thead>
+        <tr>
+          <th style="width:50px">#</th>
+          <th>Ticker</th>
+          <th>ETF</th>
+          <th class="right">Price</th>
+          <th class="right">P/E Ratio</th>
+          <th>Volume Ratio</th>
+          <th>RSI</th>
+          <th class="right">Volume</th>
+        </tr>
+      </thead>
+      <tbody id="results-body"></tbody>
+    </table>
+  </div>
+
+</main>
+
+<footer>
+  Data via Yahoo Finance (yfinance) · Filters configurable above · Ranked by RSI ↓
+</footer>
+
+<!-- ── HOLDINGS SUMMARY MODAL ──────────────────────────────────── -->
+<div id="holdings-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">📋 ETF Holdings Report</span>
+      <button class="modal-close" onclick="closeHoldingsModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--muted);font-size:13px;margin-bottom:16px;" id="modal-subtitle"></p>
+      <table class="modal-table">
+        <thead>
+          <tr>
+            <th class="col-etf">ETF</th>
+            <th class="col-name">Name</th>
+            <th class="col-ytd">YTD</th>
+            <th class="col-today">Today</th>
+            <th class="col-count">Count</th>
+            <th class="col-tickers">Tickers</th>
+          </tr>
+        </thead>
+        <tbody id="modal-holdings-body"></tbody>
+      </table>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeHoldingsModal()">Got it</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── BROWSE ALL HOLDINGS MODAL ──────────────────────────────── -->
+<div id="browse-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">🗂 All Holdings — Selected ETFs</span>
+      <button class="modal-close" onclick="closeBrowseModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="browse-search-wrap">
+        <input id="browse-search" type="text" placeholder="Search ticker…" oninput="filterBrowse(this.value)">
+        <span id="browse-count-label"></span>
+      </div>
+      <div class="browse-grid" id="browse-grid"></div>
+      <div id="browse-empty">No tickers match your search.</div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeBrowseModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── NEWS MODAL ─────────────────────────────────────────────── -->
+<div id="news-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:660px">
+    <div class="modal-header">
+      <span class="modal-title" id="news-modal-title">📰 News</span>
+      <button class="modal-close" onclick="closeNewsModal()">✕</button>
+    </div>
+    <div class="modal-body" id="news-modal-body" style="padding:0 24px 8px">
+      <div id="news-loading" style="padding:24px 0;text-align:center;color:var(--muted);">Loading…</div>
+      <ul id="news-list" class="news-list hidden"></ul>
+      <div id="news-empty" class="hidden" style="padding:24px 0;text-align:center;color:var(--muted);">No recent news found.</div>
+    </div>
+    <div class="modal-footer" style="display:flex;gap:10px;justify-content:space-between;align-items:center">
+      <div id="news-sa-links" style="display:flex;gap:10px;font-size:13px;"></div>
+      <button onclick="closeNewsModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── State ─────────────────────────────────────────────────────────
+  let pollTimer = null;
+  let isRunning = false;
+
+  // ── Helpers ───────────────────────────────────────────────────────
+  function fmtNum(n, dec = 2) {
+    return n !== null && n !== undefined ? Number(n).toFixed(dec) : '—';
+  }
+  function fmtVol(n) {
+    if (!n) return '—';
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return n.toString();
+  }
+
+  // RSI bar: 50–100 → 0–100%
+  function rsiPct(rsi) { return Math.min(100, Math.max(0, (rsi - 50) / 50 * 100)); }
+  // VolRatio bar: 2–10 → 0–100%
+  function volPct(vr)  { return Math.min(100, Math.max(0, (vr - 2) / 8 * 100)); }
+
+  // ── Research Stocks ───────────────────────────────────────────────
+  const RESEARCH_KEY = 'screener_research_stocks';
+  const getResearch  = () => { try { return JSON.parse(localStorage.getItem(RESEARCH_KEY) || '[]'); } catch { return []; } };
+  const saveResearch = s  => localStorage.setItem(RESEARCH_KEY, JSON.stringify(s));
+  const isResearch   = t  => getResearch().includes(t);
+
+  function toggleResearch(ticker, btn) {
+    const stocks = getResearch();
+    const idx    = stocks.indexOf(ticker);
+    if (idx === -1) {
+      stocks.push(ticker);
+      btn.textContent = '✓ Added';
+      btn.classList.add('added');
+    } else {
+      stocks.splice(idx, 1);
+      btn.textContent = '+ Portfolio';
+      btn.classList.remove('added');
+    }
+    saveResearch(stocks);
+    renderResearchGroup();
+  }
+
+  function removeFromResearch(ticker) {
+    saveResearch(getResearch().filter(t => t !== ticker));
+    renderResearchGroup();
+    // Reflect removal in any open browse card
+    const addBtn = document.getElementById(`add-btn-${ticker}`);
+    if (addBtn) { addBtn.textContent = '+ Portfolio'; addBtn.classList.remove('added'); }
+  }
+
+  function renderResearchGroup() {
+    const stocks    = getResearch();
+    const container = document.getElementById('research-group-container');
+    if (stocks.length === 0) { container.innerHTML = ''; return; }
+    container.innerHTML = `
+      <div class="etf-group" style="margin-top:8px">
+        <div class="etf-group-header">
+          <input type="checkbox" class="etf-group-all" id="grp-research" checked>
+          <label class="etf-group-label" for="grp-research" style="color:var(--purple)">Research Stocks</label>
+        </div>
+        <div class="etf-group-checks">
+          ${stocks.map(t => `
+            <div class="research-stock-row">
+              <label class="cb-label" style="border-color:#a371f744">
+                <input type="checkbox" class="research-check" value="${t}" checked> ${t}
+              </label>
+              <button class="research-remove" onclick="removeFromResearch('${t}')" title="Remove">✕</button>
+            </div>`).join('')}
+        </div>
+      </div>`;
+    const groupCb = document.getElementById('grp-research');
+    const members = container.querySelectorAll('input.research-check');
+    groupCb.addEventListener('change', () => members.forEach(cb => cb.checked = groupCb.checked));
+    members.forEach(cb => cb.addEventListener('change', () => {
+      const n = members.length, checked = Array.from(members).filter(c => c.checked).length;
+      groupCb.indeterminate = checked > 0 && checked < n;
+      groupCb.checked = checked === n;
+    }));
+  }
+
+  // ── Start scan ────────────────────────────────────────────────────
+  async function startScan() {
+    if (isRunning) return;
+    const universes = Array.from(document.querySelectorAll('input.etf-check:checked')).map(el => el.value);
+    if (universes.length === 0) { alert('Select at least one portfolio.'); return; }
+
+    const research = Array.from(document.querySelectorAll('input.research-check:checked')).map(el => el.value);
+    const params = {
+      universes,
+      research_stocks: research,
+      pe_max:          parseFloat(document.getElementById('inp-pe').value),
+      rsi_min:         parseFloat(document.getElementById('inp-rsi').value),
+      rsi_max:         parseFloat(document.getElementById('inp-rsi-max').value),
+      vol_ratio_min:   parseFloat(document.getElementById('inp-vol').value),
+    };
+
+    try {
+      const res = await fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      const data = await res.json();
+      if (!data.ok) { alert(data.message); return; }
+      isRunning = true;
+      setRunning(true);
+      pollStatus();
+    } catch (e) {
+      alert('Failed to start scan: ' + e.message);
+    }
+  }
+
+  function setRunning(running) {
+    const btn  = document.getElementById('run-btn');
+    const icon = document.getElementById('btn-icon');
+    const pw   = document.getElementById('progress-wrap');
+    const ld   = document.getElementById('live-dot');
+    btn.disabled = running || !holdingsReady;
+    icon.innerHTML = running ? '<span class="spinner"></span>' : '▶';
+    document.getElementById('btn-label').textContent = running ? 'Scanning…' : 'Run Scan';
+    pw.style.display = running ? 'block' : 'none';
+    ld.style.display = running ? 'inline-block' : 'none';
+  }
+
+  // ── Poll /api/status every 2s while running ───────────────────────
+  function pollStatus() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      try {
+        const res  = await fetch('/api/status');
+        const data = await res.json();
+        updateUI(data);
+        if (data.status === 'done' || data.status === 'error') {
+          clearInterval(pollTimer);
+          pollTimer = null;
+          isRunning = false;
+          setRunning(false);
+        }
+      } catch (e) {
+        console.error('Poll error:', e);
+      }
+    }, 2000);
+  }
+
+  // ── Update UI from status payload ─────────────────────────────────
+  function updateUI(data) {
+    // Status bar
+    const icons = { idle: '💤', running: '⚙️', done: '✅', error: '❌' };
+    document.getElementById('status-icon').textContent = icons[data.status] || '❓';
+    document.getElementById('status-msg').textContent  = data.message || '';
+    document.getElementById('status-sub').textContent  =
+      data.last_run ? `Last completed: ${data.last_run}` : '';
+
+    // Progress
+    document.getElementById('progress-fill').style.width = (data.progress || 0) + '%';
+
+    // Stats
+    document.getElementById('stat-universe').textContent  = data.universe_size || '—';
+    document.getElementById('stat-screened').textContent  = data.screened       || '—';
+    document.getElementById('stat-passed').textContent    = data.passed         || '—';
+    document.getElementById('stat-showing').textContent   = data.results ? data.results.length : '—';
+
+    // Last run header
+    if (data.last_run) {
+      document.getElementById('last-run').textContent = 'Last run: ' + data.last_run;
+    }
+
+    // Results
+    if (data.results && data.results.length > 0) {
+      renderResults(data.results);
+    }
+  }
+
+  // ── Render results table ──────────────────────────────────────────
+  function renderResults(results) {
+    const empty = document.getElementById('empty-state');
+    const tbl   = document.getElementById('results-table');
+    const tbody = document.getElementById('results-body');
+    const cnt   = document.getElementById('result-count');
+
+    empty.style.display = 'none';
+    tbl.style.display   = 'table';
+    cnt.textContent     = results.length + ' stock' + (results.length !== 1 ? 's' : '');
+
+    tbody.innerHTML = results.map((r, i) => {
+      const rsiW = rsiPct(r.rsi).toFixed(1);
+      const volW = volPct(r.volume_ratio).toFixed(1);
+      const etfBadges = (r.etfs || []).map(e =>
+        `<span class="etf-badge" title="${ETF_NAMES[e.toLowerCase()] || e}">${e}</span>`
+      ).join('');
+      return `
+      <tr>
+        <td><span class="rank">${i + 1}</span></td>
+        <td>
+          <div class="ticker-cell">
+            <span class="ticker-sym">${r.ticker}</span>
+          </div>
+        </td>
+        <td>${etfBadges}</td>
+        <td class="right"><span class="price-val">$${fmtNum(r.price)}</span></td>
+        <td class="right"><span class="pe-chip">${fmtNum(r.pe_ratio)}×</span></td>
+        <td>
+          <div class="meter">
+            <div class="meter-bar-bg"><div class="meter-bar bar-vol" style="width:${volW}%"></div></div>
+            <span class="meter-val" style="color:var(--warn)">${fmtNum(r.volume_ratio, 2)}×</span>
+          </div>
+        </td>
+        <td>
+          <div class="meter">
+            <div class="meter-bar-bg"><div class="meter-bar bar-rsi" style="width:${rsiW}%"></div></div>
+            <span class="meter-val" style="color:var(--purple)">${fmtNum(r.rsi, 1)}</span>
+          </div>
+        </td>
+        <td class="right" style="color:var(--muted);font-size:13px">${fmtVol(r.volume)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── View Holdings button ──────────────────────────────────────────
+  async function openHoldingsReport() {
+    try {
+      const [sRes, dRes, pRes] = await Promise.all([
+        fetch('/api/holdings'),
+        fetch('/api/holdings/data'),
+        fetch('/api/etf-performance'),
+      ]);
+      const status  = await sRes.json();
+      const data    = await dRes.json();
+      const perf    = await pRes.json();
+      showHoldingsModal({ ...status, ...data }, perf);
+    } catch(e) {
+      alert('Could not load holdings: ' + e.message);
+    }
+  }
+
+  // ── ETF groups & names ────────────────────────────────────────────
+  const ETF_GROUPS = [
+    { id: 'overview',  label: 'Stock Market Overview', etfs: ['dia','oef','spy','qqq'] },
+    { id: 'spdr',      label: 'State Street — SPDR',   etfs: ['xlv','xlk','xlf','xle','xli','xly','xlp','xlu','xlre','xlb','xlc'] },
+    { id: 'defense',   label: 'Defense',               etfs: ['xar','nato'] },
+    { id: 'blackrock', label: 'Blackrock — iShares',   etfs: ['ihak','iyh','iye','iyf','iyr','igv','ivv','iwf','iwm','ita','efa'] },
+    { id: 'vanguard',  label: 'Vanguard',              etfs: ['vgt','vfh','vht','vde','vis','vcr','vdc','vpu','vnq','vaw','vox'] },
+  ];
+  const GROUP_ORDER = ETF_GROUPS.flatMap(g => g.etfs);
+
+  const ETF_NAMES = {
+    dia:  'Dow Jones Industrial Average',
+    oef:  'S&P 100',
+    spy:  'S&P 500',
+    qqq:  'Nasdaq 100',
+    xlv:  'Health Care Select Sector SPDR Fund',
+    xlk:  'Technology Select Sector SPDR Fund',
+    xlf:  'Financial Select Sector SPDR Fund',
+    xle:  'Energy Select Sector SPDR Fund',
+    xli:  'Industrial Select Sector SPDR Fund',
+    xly:  'Consumer Discretionary Select Sector SPDR Fund',
+    xlp:  'Consumer Staples Select Sector SPDR Fund',
+    xlu:  'Utilities Select Sector SPDR Fund',
+    xlre: 'Real Estate Select Sector SPDR Fund',
+    xlb:  'Materials Select Sector SPDR Fund',
+    xlc:  'Communication Services Select Sector SPDR Fund',
+    xar:  'SPDR S&P Aerospace & Defense ETF',
+    ihak: 'iShares Cybersecurity and Tech ETF',
+    nato: 'Tema NATO & Defense ETF',
+    igv:  'iShares Expanded Tech-Software Sector ETF',
+    iyh:  'iShares U.S. Healthcare ETF',
+    iye:  'iShares U.S. Energy ETF',
+    iyf:  'iShares U.S. Financials ETF',
+    iyr:  'iShares U.S. Real Estate ETF',
+    ivv:  'iShares Core S&P 500 ETF',
+    iwf:  'iShares Russell 1000 Growth ETF',
+    iwm:  'iShares Russell 2000 ETF',
+    ita:  'iShares U.S. Aerospace & Defense ETF',
+    efa:  'iShares MSCI EAFE ETF',
+    vgt:  'Vanguard Information Technology ETF',
+    vfh:  'Vanguard Financials ETF',
+    vht:  'Vanguard Health Care ETF',
+    vde:  'Vanguard Energy ETF',
+    vis:  'Vanguard Industrials ETF',
+    vcr:  'Vanguard Consumer Discretionary ETF',
+    vdc:  'Vanguard Consumer Staples ETF',
+    vpu:  'Vanguard Utilities ETF',
+    vnq:  'Vanguard Real Estate ETF',
+    vaw:  'Vanguard Materials ETF',
+    vox:  'Vanguard Communication Services ETF',
+  };
+
+  // ── Holdings summary modal ────────────────────────────────────────
+
+  const fmtPct   = v => v != null ? (v >= 0 ? '+' : '') + v.toFixed(2) + '%' : '—';
+  const pctColor = v => v != null ? (v >= 0 ? 'var(--green)' : 'var(--danger)') : 'var(--muted)';
+
+  function showHoldingsModal(data, perf) {
+    perf = perf || {};
+    const known   = new Set(Object.keys(data.counts || {}));
+    const etfOrder = [
+      ...GROUP_ORDER.filter(e => known.has(e)),
+      ...Object.keys(data.counts || {}).filter(e => !GROUP_ORDER.includes(e)).sort(),
+    ];
+    const tickers = data.tickers || {};
+    document.getElementById('modal-subtitle').textContent =
+      `Last updated ${data.updated} · ${etfOrder.length} ETFs · ${Object.values(tickers).flat().length} total holdings`;
+    document.getElementById('modal-holdings-body').innerHTML = etfOrder.map(etf => {
+      const list = (tickers[etf] || []).length
+        ? tickers[etf].map(t => `<a href="${yf(t)}" target="_blank" rel="noopener">${t}</a>`).join(', ')
+        : '(none)';
+      const name  = ETF_NAMES[etf] || '—';
+      const p     = perf[etf] || {};
+      const price = p.price != null ? '$' + p.price.toFixed(2) : '—';
+
+      return `<tr>
+        <td class="modal-etf"><a href="${yf(etf.toUpperCase())}" target="_blank" rel="noopener">${etf.toUpperCase()}</a></td>
+        <td style="color:var(--text);font-size:12px;white-space:nowrap">${name}</td>
+        <td style="color:${pctColor(p.ytd)};font-weight:700;text-align:right;white-space:nowrap">${fmtPct(p.ytd)}</td>
+        <td style="text-align:right;white-space:nowrap">
+          <span style="color:${pctColor(p.daily)};font-weight:700">${fmtPct(p.daily)}</span>
+          <span style="color:var(--muted);font-size:12px;margin-left:6px">${price}</span>
+        </td>
+        <td style="color:var(--muted);text-align:right">${(tickers[etf]||[]).length}</td>
+        <td class="modal-tickers">${list}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('holdings-modal').classList.remove('hidden');
+  }
+
+  function closeHoldingsModal() {
+    document.getElementById('holdings-modal').classList.add('hidden');
+  }
+
+  // Close modals on backdrop click
+  [['holdings-modal', closeHoldingsModal], ['browse-modal', closeBrowseModal], ['news-modal', closeNewsModal]]
+    .forEach(([id, fn]) => document.getElementById(id).addEventListener('click', e => { if (e.target.id === id) fn(); }));
+
+  // ── Holdings status ───────────────────────────────────────────────
+  let holdingsReady = false;
+  let holdingsPollTimer = null;
+
+  function updateHoldingsUI(data) {
+    const icons = { unloaded: '⏳', loading: '🔄', ready: '✅', error: '❌' };
+    document.getElementById('holdings-icon').textContent = icons[data.status] || '❓';
+    document.getElementById('holdings-msg').textContent  = data.message || '';
+    if (data.updated) {
+      const etfCount    = Object.keys(data.counts || {}).length;
+      const totalStocks = Object.values(data.counts || {}).reduce((a, b) => a + b, 0);
+      document.getElementById('holdings-updated').textContent =
+        `${etfCount} ETFs · ${totalStocks.toLocaleString()} stocks`;
+    }
+    holdingsReady = data.status === 'ready';
+    document.getElementById('run-btn').disabled = !holdingsReady || isRunning;
+  }
+
+  function pollHoldings() {
+    holdingsPollTimer = setInterval(async () => {
+      try {
+        const res  = await fetch('/api/holdings');
+        const data = await res.json();
+        updateHoldingsUI(data);
+        if (data.status === 'ready' || data.status === 'error') {
+          clearInterval(holdingsPollTimer);
+          holdingsPollTimer = null;
+          if (data.fresh_fetch) openHoldingsReport();
+        }
+      } catch(e) { console.error('Holdings poll error:', e); }
+    }, 2000);
+  }
+
+  // ── Master select-all / uncheck-all ──────────────────────────────
+  function toggleAllEtfs(checked) {
+    document.querySelectorAll('input.etf-check').forEach(cb => cb.checked = checked);
+    document.querySelectorAll('.etf-group-all').forEach(cb => {
+      cb.checked = checked;
+      cb.indeterminate = false;
+    });
+  }
+
+  function syncMasterCheckbox() {
+    const all = document.querySelectorAll('input.etf-check');
+    const checkedCount = Array.from(all).filter(cb => cb.checked).length;
+    const master = document.getElementById('cb-select-all');
+    master.indeterminate = checkedCount > 0 && checkedCount < all.length;
+    master.checked = checkedCount === all.length;
+  }
+
+  // ── Group select-all checkboxes ───────────────────────────────────
+  function syncGroupCheckbox(groupCb, members) {
+    const checked = Array.from(members).filter(cb => cb.checked).length;
+    groupCb.indeterminate = checked > 0 && checked < members.length;
+    groupCb.checked = checked === members.length;
+  }
+
+  function initGroupCheckboxes() {
+    // Generate ETF group checkboxes from data
+    document.getElementById('etf-groups-container').innerHTML = ETF_GROUPS.map(g => `
+      <div class="etf-group">
+        <div class="etf-group-header">
+          <input type="checkbox" class="etf-group-all" id="grp-${g.id}" checked>
+          <label class="etf-group-label" for="grp-${g.id}">${g.label}</label>
+        </div>
+        <div class="etf-group-checks">
+          ${g.etfs.map(e => `<label class="cb-label"><input type="checkbox" class="etf-check" value="${e}" data-group="${g.id}" checked> ${e.toUpperCase()}</label>`).join('')}
+        </div>
+      </div>`).join('');
+
+    document.querySelectorAll('.etf-group-all').forEach(groupCb => {
+      const members = document.querySelectorAll(`input.etf-check[data-group="${groupCb.id.replace('grp-','')}"]`);
+      groupCb.addEventListener('change', () => {
+        members.forEach(cb => cb.checked = groupCb.checked);
+        syncMasterCheckbox();
+      });
+      members.forEach(cb => cb.addEventListener('change', () => {
+        syncGroupCheckbox(groupCb, members);
+        syncMasterCheckbox();
+      }));
+      syncGroupCheckbox(groupCb, members);
+    });
+  }
+
+  const yf = t => `https://finance.yahoo.com/quote/${encodeURIComponent(t)}`;
+
+  // ── Browse All Holdings modal ─────────────────────────────────────
+  let _browseCards  = [];    // [{ticker, etfs}] — built once per open
+  let _browsePrices = null;  // {ticker: price} — filled after fetch
+
+  async function openBrowseModal() {
+    const selected = new Set(
+      Array.from(document.querySelectorAll('input.etf-check:checked')).map(el => el.value)
+    );
+    if (selected.size === 0) { alert('Select at least one ETF first.'); return; }
+
+    try {
+      const res      = await fetch('/api/holdings/data');
+      const holdings = await res.json();
+      const tickers  = holdings.tickers || {};
+
+      const allWeights = holdings.weights || {};
+      const allNames   = holdings.names   || {};
+
+      // Build reverse map: ticker → [{etf, weight}]
+      const map = {};
+      for (const etf of selected) {
+        const etfW = allWeights[etf] || {};
+        for (const t of (tickers[etf] || [])) {
+          if (!map[t]) map[t] = [];
+          map[t].push({ etf: etf.toUpperCase(), weight: etfW[t] || 0 });
+        }
+      }
+
+      const maxWeight = etfs => Math.max(...etfs.map(e => parseFloat(e.weight) || 0));
+      _browseCards  = Object.entries(map)
+        .map(([ticker, etfs]) => ({ ticker, etfs, name: allNames[ticker] || '' }))
+        .sort((a, b) => maxWeight(b.etfs) - maxWeight(a.etfs) || a.ticker.localeCompare(b.ticker));
+      _browsePrices = null;
+
+      document.getElementById('browse-search').value = '';
+      document.getElementById('browse-modal').classList.remove('hidden');
+      renderBrowseCards(_browseCards);
+      document.getElementById('browse-search').focus();
+
+      // Fetch prices in background — update cards when ready
+      const allTickers = _browseCards.map(c => c.ticker);
+      fetch('/api/prices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickers: allTickers }),
+      })
+        .then(r => r.json())
+        .then(prices => {
+          _browsePrices = prices;
+          applyPricesToCards(prices);
+        })
+        .catch(() => {});
+    } catch(e) {
+      alert('Could not load holdings: ' + e.message);
+    }
+  }
+
+  function renderBrowseCards(cards) {
+    const grid  = document.getElementById('browse-grid');
+    const empty = document.getElementById('browse-empty');
+    const label = document.getElementById('browse-count-label');
+    label.textContent = cards.length + ' unique stock' + (cards.length !== 1 ? 's' : '');
+    if (cards.length === 0) {
+      grid.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    grid.innerHTML = cards.map(c => {
+      const badges = c.etfs.map(item => {
+        const etf    = typeof item === 'string' ? item : item.etf;
+        const weight = typeof item === 'string' ? 0   : (parseFloat(item.weight) || 0);
+        const wLabel = weight > 0.001
+          ? `${etf} <span style="opacity:.75">${weight.toFixed(2)}%</span>`
+          : etf;
+        return `<span class="etf-badge" title="${ETF_NAMES[etf.toLowerCase()] || etf}">${wLabel}</span>`;
+      }).join('');
+      return `<div class="browse-card" data-ticker="${c.ticker}">
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;">
+          <div class="browse-card-ticker"><a href="${yf(c.ticker)}" target="_blank" rel="noopener">${c.ticker}</a></div>
+          <div class="browse-price" style="font-size:12px;color:var(--muted);">…</div>
+        </div>
+        <div class="browse-card-etfs" style="margin-bottom:4px">${badges}</div>
+        <div class="browse-ma" style="font-size:11px;color:var(--muted);"></div>
+        ${c.name ? `<div style="font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div>` : ''}
+        <div class="browse-card-buttons">
+          <button class="browse-card-btn" onclick="openNewsModal('${c.ticker}')">📰 News</button>
+          <button class="browse-card-btn ${isResearch(c.ticker)?'added':''}" id="add-btn-${c.ticker}" onclick="toggleResearch('${c.ticker}', this)">
+            ${isResearch(c.ticker) ? '✓ Added' : '+ Portfolio'}
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function applyPricesToCards(prices) {
+    document.querySelectorAll('#browse-grid .browse-card').forEach(card => {
+      try {
+        const ticker = card.dataset.ticker;
+        const d = prices[ticker];
+
+        const priceEl = card.querySelector('.browse-price');
+        if (priceEl) {
+          if (d == null) { priceEl.textContent = '—'; }
+          else {
+            const arrow = d.change > 0 ? '▲' : d.change < 0 ? '▼' : '';
+            const color = d.change > 0 ? 'var(--green)' : d.change < 0 ? 'var(--danger)' : 'var(--muted)';
+            priceEl.innerHTML =
+              `<span style="color:var(--text);font-weight:600">$${d.price.toFixed(2)}</span>` +
+              (arrow ? ` <span style="color:${color};font-size:11px">${arrow} ${Math.abs(d.pct).toFixed(2)}%</span>` : '');
+          }
+        }
+
+        const maEl = card.querySelector('.browse-ma');
+        if (maEl && d) {
+          const ma20str = d.ma20 != null ? `MA20 $${d.ma20.toFixed(2)}` : '';
+          const ma50str = d.ma50 != null ? `MA50 $${d.ma50.toFixed(2)}` : '';
+          maEl.textContent = [ma20str, ma50str].filter(Boolean).join('  ·  ');
+        }
+      } catch(e) { console.error('applyPricesToCards error for', card.dataset.ticker, e); }
+    });
+  }
+
+  function filterBrowse(q) {
+    const term = q.trim().toUpperCase();
+    renderBrowseCards(term ? _browseCards.filter(c => c.ticker.includes(term)) : _browseCards);
+    if (_browsePrices) applyPricesToCards(_browsePrices);
+  }
+
+  function closeBrowseModal() {
+    document.getElementById('browse-modal').classList.add('hidden');
+  }
+
+
+  // ── News modal ────────────────────────────────────────────────────
+  async function openNewsModal(ticker) {
+    document.getElementById('news-modal-title').textContent = `📰 News — ${ticker}`;
+    document.getElementById('news-loading').classList.remove('hidden');
+    document.getElementById('news-list').classList.add('hidden');
+    document.getElementById('news-empty').classList.add('hidden');
+    document.getElementById('news-sa-links').innerHTML = '';
+    document.getElementById('news-modal').classList.remove('hidden');
+
+    try {
+      const res  = await fetch(`/api/news/${encodeURIComponent(ticker)}`);
+      const data = await res.json();
+
+      const dot = `<span style="color:var(--muted)">·</span>`;
+      document.getElementById('news-sa-links').innerHTML =
+        `<a class="news-sa-link" href="${data.yf_url}"   target="_blank" rel="noopener">Yahoo Finance ↗</a>` + dot +
+        `<a class="news-sa-link" href="${data.sa_url}"   target="_blank" rel="noopener">Stock Analysis ↗</a>` + dot +
+        `<a class="news-sa-link" href="${data.sea_url}"  target="_blank" rel="noopener">Seeking Alpha ↗</a>` + dot +
+        `<a class="news-sa-link" href="${data.mw_url}"   target="_blank" rel="noopener">MarketWatch ↗</a>` + dot +
+        `<a class="news-sa-link" href="${data.cnbc_url}" target="_blank" rel="noopener">CNBC ↗</a>`;
+
+      document.getElementById('news-loading').classList.add('hidden');
+      const articles = data.news || [];
+      if (articles.length === 0) {
+        document.getElementById('news-empty').classList.remove('hidden');
+        return;
+      }
+
+      const list = document.getElementById('news-list');
+      list.innerHTML = articles.map(a => {
+        const date = a.published
+          ? new Date(a.published).toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' })
+          : '';
+        const meta = [a.publisher, date].filter(Boolean).join(' · ');
+        return `<li>
+          <div class="news-title"><a href="${a.url}" target="_blank" rel="noopener">${a.title}</a></div>
+          ${meta ? `<div class="news-meta">${meta}</div>` : ''}
+        </li>`;
+      }).join('');
+      list.classList.remove('hidden');
+    } catch(e) {
+      document.getElementById('news-loading').textContent = 'Failed to load news.';
+    }
+  }
+
+  function closeNewsModal() {
+    document.getElementById('news-modal').classList.add('hidden');
+  }
+
+
+  // ── On load: check if already running ────────────────────────────
+  window.addEventListener('DOMContentLoaded', async () => {
+    initGroupCheckboxes();
+    renderResearchGroup();
+    // Disable Run Scan until holdings confirmed ready
+    document.getElementById('run-btn').disabled = true;
+
+    // Check holdings status
+    try {
+      const res  = await fetch('/api/holdings');
+      const data = await res.json();
+      updateHoldingsUI(data);
+      if (data.fresh_fetch) {
+        openHoldingsReport();
+      } else if (data.status !== 'ready' && data.status !== 'error') {
+        pollHoldings();
+      }
+    } catch(e) { pollHoldings(); }
+
+    // Check scan status
+    try {
+      const res  = await fetch('/api/status');
+      const data = await res.json();
+      updateUI(data);
+      if (data.status === 'running') {
+        isRunning = true;
+        setRunning(true);
+        pollStatus();
+      }
+    } catch (e) { /* server not ready */ }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,780 @@
+"""
+Stock Screener - Flask Backend
+Screens constituent stocks across a configurable set of ETFs for:
+  - P/E Ratio < threshold (default 30)
+  - Volume spike > threshold vs 20-day average (default 2x)
+  - RSI in range (default 50–70)
+Ranks results by RSI (descending), returns all passing stocks.
+Runs on port 8080.
+"""
+
+import os
+import re
+import json
+import time
+import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from io import BytesIO, StringIO
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import requests
+from flask import Flask, jsonify, render_template, request
+from ta.momentum import RSIIndicator
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger(__name__)
+
+app = Flask(__name__)
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+
+# ── Constants ─────────────────────────────────────────────────────────────────
+PORT             = 8080
+PE_MAX           = 30.0
+VOLUME_RATIO_MIN = 2.0
+RSI_MIN          = 50.0
+RSI_MAX          = 70.0
+RSI_PERIOD       = 14
+VOL_WINDOW       = 20
+BATCH_SIZE       = 50
+BATCH_DELAY      = 1.0
+PERF_CACHE_TTL   = 300
+
+ALL_ETFS = [
+    # Stock Market Overview
+    "dia", "oef", "spy", "qqq",
+    # State Street — SPDR
+    "xlv", "xlk", "xlf", "xle", "xar", "xli", "xly", "xlp", "xlu", "xlre", "xlb", "xlc",
+    # Defense
+    "nato",
+    # Blackrock — iShares
+    "ihak", "igv", "iyh", "iye", "iyf", "iyr", "ivv", "iwf", "iwm", "ita", "efa",
+    # Vanguard
+    "vgt", "vfh", "vht", "vde", "vis", "vcr", "vdc", "vpu", "vnq", "vaw", "vox",
+]
+HOLDINGS_CACHE_FILE = os.path.join(os.path.dirname(__file__), "holdings_cache.json")
+
+# ── State ─────────────────────────────────────────────────────────────────────
+_state = {
+    "status": "idle", "progress": 0, "message": "", "last_run": None,
+    "results": [], "universe_size": 0, "screened": 0, "passed": 0,
+    "error": None, "params": None,
+}
+_lock = threading.Lock()
+
+_perf_state: dict = {"cache": {}, "ts": 0.0}
+_perf_lock = threading.Lock()
+
+_holdings: dict[str, list[str]] = {}
+_weights:  dict[str, dict[str, float]] = {}
+_names:    dict[str, str] = {}
+_holdings_meta = {
+    "status":     "unloaded",
+    "updated":    None,
+    "message":    "Holdings not yet loaded.",
+    "fresh_fetch": False,
+}
+_holdings_lock = threading.Lock()
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+# Exchange suffixes: tickers ending with these (e.g. ASML.AS, 7203.T) keep their dot.
+# Anything else (e.g. BRK.B) is a US share class — dot becomes a dash.
+_EXCHANGE_SUFFIXES = {
+    "L", "T", "V",
+    "AS", "SW", "PA", "MC", "DE", "AX", "KS", "KQ", "HK", "TW",
+    "NS", "BO", "TO", "SZ", "SS", "MI", "BR", "LS", "OL", "ST",
+    "HE", "CO", "IR", "AT", "VI", "WA", "PR", "BK", "JK", "NZ",
+}
+
+def _normalize_ticker(raw: str) -> str:
+    t = raw.strip()
+    if "." in t:
+        base, suffix = t.rsplit(".", 1)
+        if suffix.upper() not in _EXCHANGE_SUFFIXES:
+            return f"{base}-{suffix}"   # BRK.B → BRK-B
+    return t
+
+_VANGUARD_ETFS = {"vgt", "vfh", "vht", "vde", "vis", "vcr", "vdc", "vpu", "vnq", "vaw", "vox"}
+
+_ISHARES_PRODUCTS: dict[str, tuple[str, str]] = {
+    "oef":  ("239723", "ishares-sp-100-etf"),
+    "ivv":  ("239726", "ishares-core-sp-500-etf"),
+    "iwm":  ("239710", "ishares-russell-2000-etf"),
+    "iwf":  ("239708", "ishares-russell-1000-growth-etf"),
+    "efa":  ("239623", "ishares-msci-eafe-etf"),
+    "ita":  ("239502", "ishares-us-aerospace-defense-etf"),
+    "iyr":  ("239520", "ishares-us-real-estate-etf"),
+    "iyh":  ("239511", "ishares-us-healthcare-etf"),
+    "iye":  ("239507", "ishares-us-energy-etf"),
+    "iyf":  ("239508", "ishares-us-financials-etf"),
+    "igv":  ("239771", "ishares-north-american-techsoftware-etf"),
+    "ihak": ("307352", "ishares-cybersecurity-and-tech-etf"),
+}
+
+
+def _norm_weights(raw: dict[str, float]) -> dict[str, float]:
+    """Normalise to percent form (0–100); multiply by 100 if all values ≤ 1."""
+    clean = {k: v for k, v in raw.items() if np.isfinite(v)}
+    if not clean:
+        return {}
+    scale = 100 if max(clean.values()) <= 1.0 else 1
+    return {k: round(v * scale, 4) for k, v in clean.items()}
+
+def _safe_name(val) -> str:
+    s = str(val).strip()
+    return s if s not in ("", "nan", "-", "None") else ""
+
+def _safe_float(val) -> float:
+    try:
+        v = float(val)
+        return v if np.isfinite(v) else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+_INVALID_TICKER = frozenset(("", "-", "nan", "<NA>", "None"))
+
+def _parse_df_holdings(df: pd.DataFrame, tcol: str) -> tuple[list[str], dict, dict]:
+    """Extract (tickers, weights, names) from a DataFrame given the ticker column name."""
+    wcol = next((c for c in df.columns if "weight" in str(c).lower()), None)
+    ncol = next((c for c in df.columns if str(c).lower().strip() in ("name", "security name", "issuer")), None)
+    # Use str(v) via list comprehension — pandas .astype(str) on StringDtype columns
+    # leaves pd.NA as a float-like NaN object instead of converting to the string "nan".
+    ticker_vals = [str(v).strip() for v in df[tcol]]
+    wcol_vals   = df[wcol].tolist() if wcol else None
+    ncol_vals   = df[ncol].tolist() if ncol else None
+    tickers, weights, names = [], {}, {}
+    for i, t in enumerate(ticker_vals):
+        if t not in _INVALID_TICKER and not t.startswith("Cash"):
+            nt = _normalize_ticker(t)
+            tickers.append(nt)
+            if wcol_vals:
+                weights[nt] = _safe_float(wcol_vals[i])
+            if ncol_vals:
+                n = _safe_name(ncol_vals[i])
+                if n:
+                    names[nt] = n
+    return tickers, weights, names
+
+
+def _fetch_stockanalysis(sym_lower: str) -> tuple[list[str], dict[str, float]]:
+    """Fetch tickers + weights from stockanalysis.com (top ~25 free tier)."""
+    try:
+        resp = requests.get(
+            f"https://stockanalysis.com/etf/{sym_lower}/holdings/__data.json",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        if resp.status_code == 200:
+            raw   = json.dumps(resp.json())
+            pairs = re.findall(r'"\$([A-Z]{1,5}(?:-[A-Z])?)",\s*"(\d+\.\d+)%"', raw)
+            if pairs:
+                tickers = list(dict.fromkeys(_normalize_ticker(t) for t, _ in pairs))
+                weights = {_normalize_ticker(t): _safe_float(w) for t, w in pairs}
+                return tickers, _norm_weights(weights)
+            tickers = list(dict.fromkeys(
+                _normalize_ticker(m) for m in re.findall(r'"\$([A-Z]{1,5}(?:-[A-Z])?)"', raw)
+            ))
+            return tickers, {}
+    except Exception:
+        pass
+    return [], {}
+
+
+def fetch_etf_holdings(symbol: str) -> tuple[list[str], dict[str, float], dict[str, str]]:
+    """Fetch ETF constituent tickers, weights, and names via priority pipeline.
+    Returns (tickers, {ticker: weight_pct}, {ticker: name})."""
+    sym_lower = symbol.lower()
+
+    # ── SSGA/SPDR ────────────────────────────────────────────────────
+    try:
+        url  = f"https://www.ssga.com/library-content/products/fund-data/etfs/us/holdings-daily-us-en-{sym_lower}.xlsx"
+        resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+        if resp.status_code == 200:
+            xl        = pd.read_excel(BytesIO(resp.content), header=None)
+            ticker_row = next((i for i, row in xl.iterrows() if "Ticker" in row.values), None)
+            if ticker_row is not None:
+                df = pd.read_excel(BytesIO(resp.content), header=ticker_row)
+                tickers, weights, names = _parse_df_holdings(df, "Ticker")
+                if tickers:
+                    if not weights:
+                        weights = _fetch_stockanalysis(sym_lower)[1]
+                    log.info(f"Fetched {len(tickers)} holdings from {symbol} via SSGA")
+                    return tickers, _norm_weights(weights), names
+    except Exception as e:
+        log.debug(f"{symbol} SSGA fetch failed: {e}")
+
+    # ── iShares/BlackRock ─────────────────────────────────────────────
+    if sym_lower in _ISHARES_PRODUCTS:
+        try:
+            pid, slug = _ISHARES_PRODUCTS[sym_lower]
+            url  = (f"https://www.ishares.com/us/products/{pid}/{slug}"
+                    f"/1467271812596.ajax?fileType=csv&fileName={symbol.upper()}_holdings&dataType=fund")
+            resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+            if resp.status_code == 200:
+                lines   = resp.content.decode("utf-8-sig").splitlines()
+                hdr_idx = next((i for i, l in enumerate(lines) if "Ticker" in l), None)
+                if hdr_idx is not None:
+                    df   = pd.read_csv(StringIO("\n".join(lines[hdr_idx:])))
+                    tcol = next((c for c in df.columns if "icker" in c), None)
+                    if tcol:
+                        tickers, weights, names = _parse_df_holdings(df, tcol)
+                        if tickers:
+                            if not weights:
+                                weights = _fetch_stockanalysis(sym_lower)[1]
+                            log.info(f"Fetched {len(tickers)} holdings from {symbol} via iShares")
+                            return tickers, _norm_weights(weights), names
+        except Exception as e:
+            log.debug(f"{symbol} iShares fetch failed: {e}")
+
+    # ── Vanguard ──────────────────────────────────────────────────────
+    if sym_lower in _VANGUARD_ETFS:
+        try:
+            url  = (f"https://investor.vanguard.com/investment-products/etfs"
+                    f"/profile/api/{sym_lower}/portfolio-holding/stock")
+            resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=20)
+            if resp.status_code == 200:
+                tickers, weights, names = [], {}, {}
+                for e in resp.json().get("fund", {}).get("entity", []):
+                    t = str(e.get("ticker", "")).strip()
+                    if t and t not in ("", "-", "nan"):
+                        nt = _normalize_ticker(t)
+                        tickers.append(nt)
+                        weights[nt] = _safe_float(
+                            e.get("percentWeight") or e.get("holdingPercent") or e.get("weighting") or 0)
+                        n = _safe_name(e.get("longName") or e.get("name") or e.get("fundName") or "")
+                        if n:
+                            names[nt] = n
+                if tickers:
+                    if not weights:
+                        weights = _fetch_stockanalysis(sym_lower)[1]
+                    log.info(f"Fetched {len(tickers)} holdings from {symbol} via Vanguard")
+                    return tickers, _norm_weights(weights), names
+        except Exception as e:
+            log.debug(f"{symbol} Vanguard fetch failed: {e}")
+
+    # ── Wikipedia (QQQ only) ──────────────────────────────────────────
+    if sym_lower == "qqq":
+        try:
+            resp = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100",
+                                headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+            if resp.status_code == 200:
+                for tbl in pd.read_html(StringIO(resp.text), header=0):
+                    tcol = next((c for c in tbl.columns if "ticker" in str(c).lower() or "symbol" in str(c).lower()), None)
+                    ncol = next((c for c in tbl.columns if "company" in str(c).lower() or "security" in str(c).lower()), None)
+                    if tcol and len(tbl) >= 50:
+                        ticker_vals = [str(v).strip() for v in tbl[tcol]]
+                        name_vals   = tbl[ncol].tolist() if ncol else None
+                        tickers, names = [], {}
+                        for i, t in enumerate(ticker_vals):
+                            if t not in _INVALID_TICKER:
+                                nt = _normalize_ticker(t)
+                                tickers.append(nt)
+                                if name_vals:
+                                    n = _safe_name(name_vals[i])
+                                    if n:
+                                        names[nt] = n
+                        if len(tickers) >= 50:
+                            # Supplement with weights from stockanalysis.com (top ~25 free)
+                            _, weights = _fetch_stockanalysis("qqq")
+                            log.info(f"Fetched {len(tickers)} holdings from QQQ via Wikipedia"
+                                     + (f" + {len(weights)} weights from stockanalysis.com" if weights else ""))
+                            return tickers, weights, names
+        except Exception as e:
+            log.debug(f"QQQ Wikipedia fetch failed: {e}")
+
+    # ── stockanalysis.com (top ~25 with weights, free tier) ──────────
+    try:
+        tickers, weights = _fetch_stockanalysis(sym_lower)
+        if tickers:
+            log.info(f"Fetched {len(tickers)} holdings from {symbol} via stockanalysis.com")
+            return tickers, weights, {}
+    except Exception as e:
+        log.debug(f"{symbol} stockanalysis.com fetch failed: {e}")
+
+    # ── yfinance fallback ─────────────────────────────────────────────
+    try:
+        tickers = [_normalize_ticker(str(t)) for t in yf.Ticker(symbol).funds_data.top_holdings.index if t]
+        weights = _fetch_stockanalysis(sym_lower)[1]
+        log.info(f"Fetched {len(tickers)} top holdings from {symbol} via yfinance (fallback)"
+                 + (f" + {len(weights)} weights from stockanalysis.com" if weights else ""))
+        return tickers, weights, {}
+    except Exception as e:
+        log.warning(f"Could not fetch holdings for {symbol}: {e}")
+        return [], {}, {}
+
+
+def load_holdings_cache() -> bool:
+    """Load holdings from disk. Returns True if cache exists and is current month."""
+    try:
+        if not os.path.exists(HOLDINGS_CACHE_FILE):
+            return False
+        data    = json.loads(open(HOLDINGS_CACHE_FILE).read())
+        updated = data.get("updated")
+        loaded  = data.get("holdings", {})
+        if not updated or not loaded:
+            return False
+        missing = [e for e in ALL_ETFS if e not in loaded]
+        if missing:
+            log.info(f"Cache missing ETFs {missing} — will refresh")
+            return False
+        with _holdings_lock:
+            _holdings.clear(); _holdings.update(loaded)
+            _weights.clear();  _weights.update(data.get("weights", {}))
+            _names.clear();    _names.update(data.get("names", {}))
+            _holdings_meta["updated"] = updated
+        d = datetime.strptime(updated, "%Y-%m-%d")
+        now = datetime.now()
+        return d.year == now.year and d.month == now.month
+    except Exception as e:
+        log.warning(f"Could not load holdings cache: {e}")
+        return False
+
+
+def save_holdings_cache():
+    """Persist current holdings to disk."""
+    try:
+        with _holdings_lock:
+            data = {"updated": _holdings_meta["updated"],
+                    "holdings": dict(_holdings), "weights": dict(_weights), "names": dict(_names)}
+        json.dump(data, open(HOLDINGS_CACHE_FILE, "w"), indent=2)
+        log.info(f"Holdings cache saved → {HOLDINGS_CACHE_FILE}")
+    except Exception as e:
+        log.error(f"Could not save holdings cache: {e}")
+
+
+def refresh_holdings():
+    """Fetch all ETF holdings and cache to disk. Safe to run in a background thread."""
+    with _holdings_lock:
+        _holdings_meta.update(status="loading", message="Fetching ETF holdings — please wait…")
+
+    new_h, new_w, new_n = {}, {}, {}
+    for etf in ALL_ETFS:
+        with _holdings_lock:
+            _holdings_meta["message"] = f"Fetching {etf.upper()} holdings…"
+        tickers, weights, names = fetch_etf_holdings(etf.upper())
+        new_h[etf] = tickers
+        new_w[etf] = weights
+        for t, n in names.items():
+            new_n.setdefault(t, n)
+        log.info(f"  {etf.upper()}: {len(tickers)} holdings")
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    with _holdings_lock:
+        _holdings.clear(); _holdings.update(new_h)
+        _weights.clear();  _weights.update(new_w)
+        _names.clear();    _names.update(new_n)
+        _holdings_meta.update(updated=today, status="ready",
+                              message=f"Holdings ready — last updated {today}",
+                              fresh_fetch=True)
+    save_holdings_cache()
+
+
+def get_universe(universes: list[str]) -> list[str]:
+    """Build deduplicated ticker universe from selected ETFs."""
+    with _holdings_lock:
+        tickers = [t for etf in universes for t in _holdings.get(etf.lower(), [])]
+    combined = list(dict.fromkeys(tickers))
+    log.info(f"Universe: {len(combined)} tickers from {', '.join(universes)}")
+    return combined
+
+
+def compute_rsi(closes: pd.Series, period: int = RSI_PERIOD) -> float:
+    try:
+        if len(closes) < period + 1:
+            return np.nan
+        val = RSIIndicator(close=closes, window=period).rsi().iloc[-1]
+        return float(val) if not np.isnan(val) else np.nan
+    except Exception:
+        return np.nan
+
+
+def screen_batch(tickers: list[str], pe_max: float, rsi_min: float, rsi_max: float, vol_ratio_min: float) -> list[dict]:
+    """Download and screen a batch of tickers. Returns passing stocks."""
+    try:
+        data = yf.download(tickers=tickers, period="3mo", interval="1d",
+                           group_by="ticker", auto_adjust=True, progress=False, threads=True)
+    except Exception as e:
+        log.error(f"yfinance download error: {e}")
+        return []
+
+    def _get_df(ticker: str) -> pd.DataFrame | None:
+        if ticker not in data.columns.get_level_values(0):
+            return None
+        return data[ticker].copy()
+
+    # Pass 1: RSI + volume filter
+    survivors: list[tuple[str, float, float, float, float, float]] = []
+    for ticker in tickers:
+        try:
+            df = _get_df(ticker)
+            if df is None:
+                continue
+            df = df.dropna(subset=["Close", "Volume"])
+            if len(df) < VOL_WINDOW + RSI_PERIOD:
+                continue
+
+            closes, volumes = df["Close"], df["Volume"]
+            rsi = compute_rsi(closes)
+            if np.isnan(rsi) or rsi <= rsi_min or rsi > rsi_max:
+                continue
+
+            avg_vol    = volumes.iloc[-VOL_WINDOW - 1:-1].mean()
+            latest_vol = volumes.iloc[-1]
+            if avg_vol == 0 or latest_vol / avg_vol < vol_ratio_min:
+                continue
+
+            survivors.append((ticker, float(rsi), float(latest_vol / avg_vol),
+                               float(latest_vol), float(avg_vol), float(closes.dropna().iloc[-1])))
+        except Exception as e:
+            log.debug(f"  ✗ {ticker}: {e}")
+
+    if not survivors:
+        return []
+
+    # Pass 2: P/E for survivors in parallel
+    def fetch_pe(ticker: str, last_close: float) -> dict | None:
+        try:
+            tkr        = yf.Ticker(ticker)
+            fi         = tkr.fast_info
+            market_cap = getattr(fi, "market_cap", None)
+            price      = float(getattr(fi, "last_price", last_close))
+            if not market_cap or market_cap <= 0:
+                return None
+            fin = tkr.financials
+            if fin is None or fin.empty or "Net Income" not in fin.index:
+                return None
+            net_income = float(fin.loc["Net Income"].iloc[0])
+            if net_income <= 0:
+                return None
+            pe = market_cap / net_income
+            if pe <= 0 or pe >= pe_max:
+                return None
+            return {"price": round(price, 2), "pe": round(pe, 2)}
+        except Exception:
+            return None
+
+    results = []
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        future_map = {
+            pool.submit(fetch_pe, ticker, last_close): (ticker, rsi, vol_ratio, latest_vol, avg_vol)
+            for ticker, rsi, vol_ratio, latest_vol, avg_vol, last_close in survivors
+        }
+        for future in as_completed(future_map):
+            ticker, rsi, vol_ratio, latest_vol, avg_vol = future_map[future]
+            pe_data = future.result()
+            if pe_data is None:
+                continue
+            results.append({
+                "ticker": ticker, "price": pe_data["price"], "pe_ratio": pe_data["pe"],
+                "volume_ratio": round(vol_ratio, 2), "rsi": round(rsi, 2),
+                "volume": int(latest_vol), "avg_volume": int(avg_vol),
+            })
+            log.info(f"  ✓ {ticker} | P/E={pe_data['pe']:.1f} | VolRatio={vol_ratio:.2f}x | RSI={rsi:.1f}")
+    return results
+
+
+def run_screener(params: dict):
+    """Full screening run — called in a background thread."""
+    universes     = params.get("universes", ALL_ETFS)
+    pe_max        = float(params.get("pe_max", PE_MAX))
+    rsi_min       = float(params.get("rsi_min", RSI_MIN))
+    rsi_max       = float(params.get("rsi_max", RSI_MAX))
+    vol_ratio_min = float(params.get("vol_ratio_min", VOLUME_RATIO_MIN))
+
+    with _lock:
+        _state.update(status="running", progress=0, results=[], error=None,
+                      message="Fetching stock universe…", screened=0, passed=0, params=params)
+
+    try:
+        research = [_normalize_ticker(t.strip().upper()) for t in params.get("research_stocks", []) if t.strip()]
+        universe = get_universe(universes)
+
+        with _holdings_lock:
+            ticker_etf_map: dict[str, list[str]] = {}
+            for etf in universes:
+                for t in _holdings.get(etf.lower(), []):
+                    ticker_etf_map.setdefault(t, []).append(etf.upper())
+
+        for t in research:
+            ticker_etf_map.setdefault(t, []).append("Research")
+            if t not in universe:
+                universe.append(t)
+
+        total = len(universe)
+        with _lock:
+            _state.update(universe_size=total, message=f"Screening {total} stocks in batches…")
+
+        all_results = []
+        batches = [universe[i:i + BATCH_SIZE] for i in range(0, total, BATCH_SIZE)]
+
+        for idx, batch in enumerate(batches):
+            with _lock:
+                _state.update(
+                    progress=int((idx / len(batches)) * 90),
+                    message=f"Batch {idx + 1}/{len(batches)} | Screened {idx * BATCH_SIZE}/{total} | Passed {len(all_results)}",
+                )
+            batch_results = screen_batch(batch, pe_max, rsi_min, rsi_max, vol_ratio_min)
+            for r in batch_results:
+                r["etfs"] = ticker_etf_map.get(r["ticker"], [])
+            all_results.extend(batch_results)
+            with _lock:
+                _state.update(screened=min((idx + 1) * BATCH_SIZE, total), passed=len(all_results))
+            if idx < len(batches) - 1:
+                time.sleep(BATCH_DELAY)
+
+        all_results.sort(key=lambda x: x["rsi"], reverse=True)
+        with _lock:
+            _state.update(status="done", progress=100, results=all_results,
+                          last_run=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                          message=f"Scan complete — {_state['screened']} screened, {len(all_results)} passed all filters")
+        log.info(f"Screener done. {len(all_results)} passed.")
+
+    except Exception as e:
+        log.error(f"Screener error: {e}", exc_info=True)
+        with _lock:
+            _state.update(status="error", error=str(e), message=f"Error: {e}")
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/api/run", methods=["POST"])
+def api_run():
+    with _holdings_lock:
+        if _holdings_meta["status"] != "ready":
+            return jsonify({"ok": False, "message": _holdings_meta["message"]}), 409
+    with _lock:
+        if _state["status"] == "running":
+            return jsonify({"ok": False, "message": "Screener already running"}), 409
+
+    body = request.get_json(silent=True) or {}
+    params = {
+        "universes":       body.get("universes", ALL_ETFS),
+        "research_stocks": body.get("research_stocks", []),
+        "pe_max":          float(body.get("pe_max", PE_MAX)),
+        "rsi_min":         float(body.get("rsi_min", RSI_MIN)),
+        "rsi_max":         float(body.get("rsi_max", RSI_MAX)),
+        "vol_ratio_min":   float(body.get("vol_ratio_min", VOLUME_RATIO_MIN)),
+    }
+    threading.Thread(target=run_screener, args=(params,), daemon=True).start()
+    return jsonify({"ok": True, "message": "Screener started"})
+
+
+@app.route("/api/status")
+def api_status():
+    with _lock:
+        return jsonify(dict(_state))
+
+
+@app.route("/api/holdings")
+def api_holdings():
+    """Lightweight status endpoint — safe to poll every 2s."""
+    with _holdings_lock:
+        fresh = _holdings_meta["fresh_fetch"]
+        _holdings_meta["fresh_fetch"] = False
+        return jsonify({
+            "status":      _holdings_meta["status"],
+            "updated":     _holdings_meta["updated"],
+            "message":     _holdings_meta["message"],
+            "counts":      {k: len(v) for k, v in _holdings.items()},
+            "fresh_fetch": fresh,
+        })
+
+
+@app.route("/api/holdings/data")
+def api_holdings_data():
+    """Full tickers/weights/names — call once on demand, not on a poll loop."""
+    with _holdings_lock:
+        return jsonify({"tickers": dict(_holdings), "weights": dict(_weights), "names": dict(_names)})
+
+
+def _fetch_etf_performance() -> dict:
+    """Download YTD price data for all ETFs; return ytd%, daily%, and price."""
+    symbols = [e.upper() for e in ALL_ETFS]
+    result  = {e: {"ytd": None, "daily": None, "price": None} for e in ALL_ETFS}
+    data = yf.download(symbols, start=f"{datetime.now().year}-01-01",
+                       auto_adjust=True, progress=False, group_by="ticker", threads=True)
+    for etf in ALL_ETFS:
+        try:
+            closes = data[etf.upper()]["Close"].dropna()
+            if len(closes) >= 2:
+                first, prev, last = float(closes.iloc[0]), float(closes.iloc[-2]), float(closes.iloc[-1])
+                result[etf] = {
+                    "ytd":   round((last - first) / first * 100, 2),
+                    "daily": round((last - prev)  / prev  * 100, 2),
+                    "price": round(last, 2),
+                }
+        except Exception:
+            pass
+    return result
+
+
+@app.route("/api/etf-performance")
+def api_etf_performance():
+    """YTD%, daily%, and price for every ETF. Cached for 5 minutes.
+    Lock released before blocking fetch — concurrent misses both fetch, second write is harmless."""
+    with _perf_lock:
+        if time.time() - _perf_state["ts"] < PERF_CACHE_TTL and _perf_state["cache"]:
+            return jsonify(_perf_state["cache"])
+    try:
+        result = _fetch_etf_performance()
+    except Exception as e:
+        log.warning(f"ETF performance fetch failed: {e}")
+        with _perf_lock:
+            return jsonify(_perf_state["cache"] or {e: {"ytd": None, "daily": None, "price": None} for e in ALL_ETFS})
+    with _perf_lock:
+        _perf_state["cache"].clear()
+        _perf_state["cache"].update(result)
+        _perf_state["ts"] = time.time()
+    return jsonify(result)
+
+
+@app.route("/api/prices", methods=["POST"])
+def api_prices():
+    """Latest price, daily change, and MA20/MA50 for a list of tickers."""
+    tickers = (request.get_json(silent=True) or {}).get("tickers", [])
+    if not tickers:
+        return jsonify({})
+
+    prices = {}
+    try:
+        data = yf.download(tickers=tickers, period="3mo", interval="1d",
+                           group_by="ticker", auto_adjust=True, progress=False, threads=True)
+        for ticker in tickers:
+            try:
+                if ticker not in data.columns.get_level_values(0):
+                    continue
+                closes = data[ticker]["Close"].dropna()
+                if len(closes) < 2:
+                    continue
+                last, prev = float(closes.iloc[-1]), float(closes.iloc[-2])
+                prices[ticker] = {
+                    "price":  round(last, 2),
+                    "change": round(last - prev, 2),
+                    "pct":    round((last - prev) / prev * 100, 2) if prev else 0,
+                    "ma20":   round(float(closes.iloc[-20:].mean()), 2) if len(closes) >= 20 else None,
+                    "ma50":   round(float(closes.iloc[-50:].mean()), 2) if len(closes) >= 50 else None,
+                }
+            except Exception:
+                pass
+    except Exception as e:
+        log.warning(f"Price fetch failed: {e}")
+    return jsonify(prices)
+
+
+@app.route("/api/news/<path:ticker>")
+def api_news(ticker):
+    ticker = ticker.upper()
+    articles = []
+    try:
+        raw = yf.Ticker(ticker).news or []
+        for a in raw[:20]:
+            content = a.get("content", {})
+            if content:
+                title     = content.get("title", "")
+                url       = (content.get("canonicalUrl") or {}).get("url", "")
+                publisher = (content.get("provider") or {}).get("displayName", "")
+                pub_date  = content.get("pubDate", "")
+            else:
+                title     = a.get("title", "")
+                url       = a.get("link", "")
+                publisher = a.get("publisher", "")
+                ts        = a.get("providerPublishTime")
+                pub_date  = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else ""
+            if title and url:
+                articles.append({"title": title, "url": url, "publisher": publisher, "published": pub_date})
+    except Exception as e:
+        log.debug(f"News fetch failed for {ticker}: {e}")
+    is_etf = ticker.lower() in ALL_ETFS
+    sym    = ticker.lower().replace(".", "-")
+    mw_path = "fund" if is_etf else "stock"
+    links = {
+        "yf_url":  f"https://finance.yahoo.com/quote/{ticker}/news/",
+        "sa_url":  f"https://stockanalysis.com/{'etf' if is_etf else 'stocks'}/{sym}/",
+        "sea_url": f"https://seekingalpha.com/symbol/{ticker}/news",
+        "mw_url":  f"https://www.marketwatch.com/investing/{mw_path}/{sym}",
+        "cnbc_url": f"https://www.cnbc.com/quotes/{ticker}",
+    }
+    return jsonify({"news": articles, **links})
+
+
+@app.route("/api/results")
+def api_results():
+    with _lock:
+        return jsonify({"results": _state["results"], "last_run": _state["last_run"],
+                        "count": len(_state["results"])})
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+def print_holdings_table():
+    with _holdings_lock:
+        snapshot = dict(_holdings)
+
+    all_tickers: list[str] = []
+    rows: list[tuple[str, int, list[str]]] = []
+    for etf in ALL_ETFS:
+        tickers = snapshot.get(etf, [])
+        rows.append((etf.upper(), len(tickers), tickers))
+        all_tickers.extend(tickers)
+
+    col = 80
+    sep = "-" * (col + 16)
+    print("\n" + "=" * (col + 16))
+    print(f"  ETF HOLDINGS SUMMARY  (updated {_holdings_meta['updated']})")
+    print("=" * (col + 16))
+    print(f"  {'ETF':<7} {'Count':>6}   Tickers")
+    print(sep)
+    for etf, count, tickers in rows:
+        words = (", ".join(tickers) if tickers else "(none)").split(", ")
+        lines: list[str] = []
+        line = ""
+        for w in words:
+            candidate = f"{line}, {w}" if line else w
+            if len(candidate) <= col:
+                line = candidate
+            else:
+                lines.append(line)
+                line = w
+        if line:
+            lines.append(line)
+        print(f"  {etf:<7} {count:>6}   {lines[0] if lines else ''}")
+        for extra in lines[1:]:
+            print(f"  {'':>14}{extra}")
+    print(sep)
+    print(f"  {'TOTAL':<7} {len(dict.fromkeys(all_tickers)):>6}   unique tickers across all ETFs")
+    print("=" * (col + 16) + "\n")
+
+
+if __name__ == "__main__":
+    print("\n" + "=" * 50)
+    print("  STOCK SCREENER — Startup")
+    print("=" * 50)
+
+    answer = input("  Update ETF stock list before starting? (y/n): ").strip().lower()
+
+    if answer == "y":
+        print("  Fetching holdings for all ETFs…\n")
+        refresh_holdings()
+        print_holdings_table()
+    else:
+        loaded = load_holdings_cache()
+        if loaded:
+            with _holdings_lock:
+                _holdings_meta.update(status="ready",
+                                      message=f"Holdings loaded from cache — {_holdings_meta['updated']}")
+            print(f"  Holdings loaded from cache ({_holdings_meta['updated']}).\n")
+        else:
+            print("  No current cache found — fetching holdings now…\n")
+            refresh_holdings()
+            print_holdings_table()
+
+    log.info(f"Starting Stock Screener on http://localhost:{PORT}")
+    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
