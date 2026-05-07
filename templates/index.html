@@ -1478,7 +1478,15 @@
       _ahData = await res.json();
       const movers = Object.values(_ahData).filter(v => Math.abs(v.pct) >= 5).length;
       status.textContent = movers > 0 ? `${movers} stock${movers !== 1 ? 's' : ''} with ≥5% move` : 'No significant movers';
-      document.getElementById('ah-filter-btn').style.display = movers > 0 ? '' : 'none';
+      const filterBtn = document.getElementById('ah-filter-btn');
+      if (movers > 0) {
+        _ahFilterOnly = true;
+        filterBtn.style.display = '';
+        filterBtn.classList.add('active-up');
+        filterBtn.textContent = 'Show all';
+      } else {
+        filterBtn.style.display = 'none';
+      }
     } catch(e) {
       status.textContent = 'Failed to load';
       _ahData = null;
