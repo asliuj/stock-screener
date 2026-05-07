@@ -758,7 +758,7 @@ def api_news(ticker):
 def api_extended(ticker):
     """After-hours/pre-market quote, earnings calendar, analyst consensus, and recent upgrades."""
     ticker = ticker.upper()
-    out = {"post_market": None, "pre_market": None, "earnings": None, "analyst": None, "upgrades": []}
+    out = {"post_market": None, "pre_market": None, "volume": None, "earnings": None, "analyst": None, "upgrades": []}
     try:
         tkr  = yf.Ticker(ticker)
         fi   = tkr.fast_info
@@ -786,6 +786,16 @@ def api_extended(ticker):
                                 "pct": round(change / last * 100, 2)}
             except Exception:
                 pass
+
+        # Volume
+        vol     = info.get("regularMarketVolume") or info.get("volume")
+        avg_vol = info.get("averageVolume") or info.get("averageDailyVolume3Month")
+        if vol:
+            out["volume"] = {
+                "today":   int(vol),
+                "avg":     int(avg_vol) if avg_vol else None,
+                "ratio":   round(vol / avg_vol, 2) if avg_vol else None,
+            }
 
         # Earnings calendar
         try:

@@ -1558,6 +1558,7 @@
 
     try {
       const res  = await fetch(`/api/extended/${encodeURIComponent(ticker)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       let html = '';
 
@@ -1567,6 +1568,21 @@
         if (data.post_market) html += _intelQuoteRow('After-Hours', data.post_market);
         if (data.pre_market)  html += _intelQuoteRow('Pre-Market',  data.pre_market);
         html += `</div>`;
+      }
+
+      // Volume
+      const v = data.volume;
+      if (v) {
+        const ratio = v.ratio;
+        const ratioColor = ratio >= 2 ? 'var(--warn)' : ratio >= 1.5 ? 'var(--text)' : 'var(--muted)';
+        html += `<div class="intel-section"><div class="intel-section-title">📊 Volume</div>
+          <div class="intel-row"><span class="intel-label">Today</span>
+            <span class="intel-val">${fmtVol(v.today)}</span></div>
+          ${v.avg ? `<div class="intel-row"><span class="intel-label">Avg (3mo)</span>
+            <span class="intel-val" style="color:var(--muted)">${fmtVol(v.avg)}</span></div>` : ''}
+          ${ratio != null ? `<div class="intel-row"><span class="intel-label">vs Average</span>
+            <span class="intel-val" style="color:${ratioColor};font-weight:700">${ratio.toFixed(2)}×</span></div>` : ''}
+        </div>`;
       }
 
       // Earnings
@@ -1622,7 +1638,7 @@
       document.getElementById('intel-loading').style.display = 'none';
       document.getElementById('intel-content').classList.remove('hidden');
     } catch(e) {
-      document.getElementById('intel-loading').textContent = 'Failed to load market data.';
+      document.getElementById('intel-loading').textContent = `Failed to load market data. ${e.message || ''}`;
     }
   }
 
