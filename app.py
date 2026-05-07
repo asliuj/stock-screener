@@ -15,7 +15,7 @@ import time
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from io import BytesIO, StringIO
 
 import numpy as np
@@ -39,8 +39,8 @@ RSI_MIN          = 50.0
 RSI_MAX          = 70.0
 RSI_PERIOD       = 14
 VOL_WINDOW       = 20
-BATCH_SIZE       = 50
-BATCH_DELAY      = 1.0
+BATCH_SIZE       = 25
+BATCH_DELAY      = 2.0
 PERF_CACHE_TTL   = 300
 
 ALL_ETFS = [
@@ -311,7 +311,7 @@ def load_holdings_cache() -> bool:
     try:
         if not os.path.exists(HOLDINGS_CACHE_FILE):
             return False
-        data    = json.loads(open(HOLDINGS_CACHE_FILE).read())
+        data    = json.load(open(HOLDINGS_CACHE_FILE))
         updated = data.get("updated")
         loaded  = data.get("holdings", {})
         if not updated or not loaded:
@@ -391,19 +391,74 @@ def compute_rsi(closes: pd.Series, period: int = RSI_PERIOD) -> float:
         return np.nan
 
 
+def _yf_download(tickers, max_retries: int = 3, **kwargs):
+    """yf.download with exponential-backoff retry on rate-limit errors."""
+    kwargs = {"group_by": "ticker", "auto_adjust": True, "progress": False, "threads": True} | kwargs
+    for attempt in range(max_retries):
+        try:
+            return yf.download(tickers=tickers, **kwargs)
+        except Exception as e:
+            is_rate_limit = any(k in str(e).lower() for k in ("rate", "429", "too many"))
+            if is_rate_limit and attempt < max_retries - 1:
+                wait = 10 * (2 ** attempt)   # 10s, 20s, 40s
+                log.warning(f"Rate limited — retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+            else:
+                raise
+
+
+def _fetch_history_stooq(ticker: str, days: int = 90) -> pd.DataFrame | None:
+    """Fetch daily OHLCV from Stooq as a fallback when yfinance is rate limited."""
+    try:
+        end   = datetime.now().strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        sym   = ticker.replace("-", ".").lower()
+        url   = f"https://stooq.com/q/d/l/?s={sym}.us&d1={start}&d2={end}&i=d"
+        resp  = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        if resp.status_code != 200 or "No data" in resp.text[:50]:
+            return None
+        df = pd.read_csv(StringIO(resp.text), parse_dates=["Date"]).sort_values("Date")
+        if "Close" not in df.columns or "Volume" not in df.columns or len(df) < 30:
+            return None
+        return df.set_index("Date")
+    except Exception:
+        return None
+
+
+def _fetch_pe_cnbc(ticker: str) -> float | None:
+    """Fetch trailing P/E ratio from CNBC's free quote API."""
+    try:
+        url  = (f"https://quote.cnbc.com/quote-html-webservice/quote.htm"
+                f"?symbols={ticker}&requestMethod=itv&noform=1&partnerId=2"
+                f"&fund=1&exthrs=1&outputFormat=json&events=0")
+        resp = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        quote = (data.get("QuickQuoteResult", {})
+                     .get("QuickQuote", [None])[0])
+        if not quote:
+            return None
+        pe = quote.get("pe") or quote.get("PERatio")
+        return float(pe) if pe not in (None, "", "N/A") else None
+    except Exception:
+        return None
+
+
 def screen_batch(tickers: list[str], pe_max: float, rsi_min: float, rsi_max: float, vol_ratio_min: float) -> list[dict]:
     """Download and screen a batch of tickers. Returns passing stocks."""
+    # Try yfinance batch download; fall back to per-ticker Stooq on rate limit
     try:
-        data = yf.download(tickers=tickers, period="3mo", interval="1d",
-                           group_by="ticker", auto_adjust=True, progress=False, threads=True)
+        data = _yf_download(tickers, period="3mo", interval="1d")
+        ticker_data: dict[str, pd.DataFrame] = {
+            t: data[t].copy() for t in tickers if t in data.columns.get_level_values(0)
+        }
     except Exception as e:
-        log.error(f"yfinance download error: {e}")
-        return []
+        log.warning(f"yfinance batch failed ({e}); falling back to Stooq per-ticker")
+        ticker_data = {t: df for t in tickers if (df := _fetch_history_stooq(t)) is not None}
 
     def _get_df(ticker: str) -> pd.DataFrame | None:
-        if ticker not in data.columns.get_level_values(0):
-            return None
-        return data[ticker].copy()
+        return ticker_data.get(ticker)
 
     # Pass 1: RSI + volume filter
     survivors: list[tuple[str, float, float, float, float, float]] = []
@@ -436,28 +491,30 @@ def screen_batch(tickers: list[str], pe_max: float, rsi_min: float, rsi_max: flo
 
     # Pass 2: P/E for survivors in parallel
     def fetch_pe(ticker: str, last_close: float) -> dict | None:
+        pe, price = None, last_close
         try:
             tkr        = yf.Ticker(ticker)
             fi         = tkr.fast_info
             market_cap = getattr(fi, "market_cap", None)
             price      = float(getattr(fi, "last_price", last_close))
-            if not market_cap or market_cap <= 0:
-                return None
-            fin = tkr.financials
-            if fin is None or fin.empty or "Net Income" not in fin.index:
-                return None
-            net_income = float(fin.loc["Net Income"].iloc[0])
-            if net_income <= 0:
-                return None
-            pe = market_cap / net_income
-            if pe <= 0 or pe >= pe_max:
-                return None
-            return {"price": round(price, 2), "pe": round(pe, 2)}
+            if market_cap and market_cap > 0:
+                fin = tkr.financials
+                if fin is not None and not fin.empty and "Net Income" in fin.index:
+                    net_income = float(fin.loc["Net Income"].iloc[0])
+                    if net_income > 0:
+                        pe = market_cap / net_income
         except Exception:
+            pass
+
+        if pe is None:
+            pe = _fetch_pe_cnbc(ticker)
+
+        if pe is None or pe <= 0 or pe >= pe_max:
             return None
+        return {"price": round(price, 2), "pe": round(pe, 2)}
 
     results = []
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    with ThreadPoolExecutor(max_workers=5) as pool:
         future_map = {
             pool.submit(fetch_pe, ticker, last_close): (ticker, rsi, vol_ratio, latest_vol, avg_vol)
             for ticker, rsi, vol_ratio, latest_vol, avg_vol, last_close in survivors
@@ -599,8 +656,7 @@ def _fetch_etf_performance() -> dict:
     """Download YTD price data for all ETFs; return ytd%, daily%, and price."""
     symbols = [e.upper() for e in ALL_ETFS]
     result  = {e: {"ytd": None, "daily": None, "price": None} for e in ALL_ETFS}
-    data = yf.download(symbols, start=f"{datetime.now().year}-01-01",
-                       auto_adjust=True, progress=False, group_by="ticker", threads=True)
+    data = _yf_download(symbols, start=f"{datetime.now().year}-01-01")
     for etf in ALL_ETFS:
         try:
             closes = data[etf.upper()]["Close"].dropna()
@@ -645,8 +701,7 @@ def api_prices():
 
     prices = {}
     try:
-        data = yf.download(tickers=tickers, period="3mo", interval="1d",
-                           group_by="ticker", auto_adjust=True, progress=False, threads=True)
+        data = _yf_download(tickers, period="3mo", interval="1d")
         for ticker in tickers:
             try:
                 if ticker not in data.columns.get_level_values(0):
@@ -674,20 +729,13 @@ def api_news(ticker):
     ticker = ticker.upper()
     articles = []
     try:
-        raw = yf.Ticker(ticker).news or []
-        for a in raw[:20]:
-            content = a.get("content", {})
-            if content:
-                title     = content.get("title", "")
-                url       = (content.get("canonicalUrl") or {}).get("url", "")
-                publisher = (content.get("provider") or {}).get("displayName", "")
-                pub_date  = content.get("pubDate", "")
-            else:
-                title     = a.get("title", "")
-                url       = a.get("link", "")
-                publisher = a.get("publisher", "")
-                ts        = a.get("providerPublishTime")
-                pub_date  = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else ""
+        for a in (yf.Ticker(ticker).news or [])[:20]:
+            c         = a.get("content") or {}
+            title     = c.get("title")     or a.get("title", "")
+            url       = (c.get("canonicalUrl") or {}).get("url") or a.get("link", "")
+            publisher = (c.get("provider")    or {}).get("displayName") or a.get("publisher", "")
+            ts        = a.get("providerPublishTime")
+            pub_date  = c.get("pubDate") or (datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else "")
             if title and url:
                 articles.append({"title": title, "url": url, "publisher": publisher, "published": pub_date})
     except Exception as e:

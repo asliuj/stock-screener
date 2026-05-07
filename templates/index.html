@@ -482,6 +482,27 @@
     .browse-card-ticker a:hover { text-decoration: underline; }
     .browse-card-etfs { display: flex; flex-wrap: wrap; gap: 3px; }
     #browse-empty { text-align:center; padding:40px; color:var(--muted); font-size:14px; display:none; }
+    .browse-filter-row {
+      display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 12px;
+    }
+    .browse-filter-row label { font-size: 11px; color: var(--muted); font-weight: 600; margin-right: 2px; }
+    .filter-btn {
+      padding: 3px 10px; font-size: 11px; border-radius: 12px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--surface2); color: var(--muted);
+      transition: all .12s;
+    }
+    .filter-btn:hover { border-color: var(--blue); color: var(--text); }
+    .filter-btn.active-up   { background: #2386361a; border-color: var(--green);  color: var(--green);  }
+    .filter-btn.active-down { background: #da36331a; border-color: var(--danger); color: var(--danger); }
+    .filter-btn.active-all  { background: var(--surface2); border-color: var(--blue); color: var(--blue); }
+    .filter-sep { color: var(--border); font-size: 13px; }
+    .filter-custom { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+    .filter-custom input {
+      width: 52px; padding: 2px 6px; font-size: 11px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text); outline: none;
+    }
+    .filter-custom input:focus { border-color: var(--blue); }
     .browse-card-btn {
       margin-top: 6px;
       padding: 3px 9px;
@@ -734,6 +755,25 @@
         <input id="browse-search" type="text" placeholder="Search ticker…" oninput="filterBrowse(this.value)">
         <span id="browse-count-label"></span>
       </div>
+      <div class="browse-filter-row">
+        <label>% Change:</label>
+        <button class="filter-btn active-all" onclick="setPctFilter('all',this)">All</button>
+        <button class="filter-btn" onclick="setPctFilter('gainers',this)">▲ Gainers</button>
+        <button class="filter-btn" onclick="setPctFilter('up1',this)">▲ &gt;1%</button>
+        <button class="filter-btn" onclick="setPctFilter('up2',this)">▲ &gt;2%</button>
+        <button class="filter-btn" onclick="setPctFilter('up5',this)">▲ &gt;5%</button>
+        <span class="filter-sep">|</span>
+        <button class="filter-btn" onclick="setPctFilter('losers',this)">▼ Losers</button>
+        <button class="filter-btn" onclick="setPctFilter('down1',this)">▼ &gt;1%</button>
+        <button class="filter-btn" onclick="setPctFilter('down2',this)">▼ &gt;2%</button>
+        <button class="filter-btn" onclick="setPctFilter('down5',this)">▼ &gt;5%</button>
+        <span class="filter-sep">|</span>
+        <div class="filter-custom">
+          Min <input id="filter-pct-min" type="number" step="0.1" placeholder="e.g. -3">%
+          Max <input id="filter-pct-max" type="number" step="0.1" placeholder="e.g. 5">%
+          <button class="filter-btn" onclick="applyCustomPctFilter()">Apply</button>
+        </div>
+      </div>
       <div class="browse-grid" id="browse-grid"></div>
       <div id="browse-empty">No tickers match your search.</div>
     </div>
@@ -921,10 +961,9 @@
     document.getElementById('progress-fill').style.width = (data.progress || 0) + '%';
 
     // Stats
-    document.getElementById('stat-universe').textContent  = data.universe_size || '—';
-    document.getElementById('stat-screened').textContent  = data.screened       || '—';
-    document.getElementById('stat-passed').textContent    = data.passed         || '—';
-    document.getElementById('stat-showing').textContent   = data.results ? data.results.length : '—';
+    [['stat-universe', data.universe_size], ['stat-screened', data.screened],
+     ['stat-passed', data.passed], ['stat-showing', data.results?.length]]
+      .forEach(([id, v]) => document.getElementById(id).textContent = v ?? '—');
 
     // Last run header
     if (data.last_run) {
@@ -1184,8 +1223,56 @@
   const yf = t => `https://finance.yahoo.com/quote/${encodeURIComponent(t)}`;
 
   // ── Browse All Holdings modal ─────────────────────────────────────
-  let _browseCards  = [];    // [{ticker, etfs}] — built once per open
-  let _browsePrices = null;  // {ticker: price} — filled after fetch
+  let _browseCards  = [];
+  let _browsePrices = null;
+  let _browseFilter = { min: null, max: null };  // daily % change filter
+
+  const PCT_PRESETS = {
+    all:     { min: null, max: null },
+    gainers: { min: 0,    max: null },
+    up1:     { min: 1,    max: null },
+    up2:     { min: 2,    max: null },
+    up5:     { min: 5,    max: null },
+    losers:  { min: null, max: 0 },
+    down1:   { min: null, max: -1 },
+    down2:   { min: null, max: -2 },
+    down5:   { min: null, max: -5 },
+  };
+
+  function _clearFilterBtns() {
+    document.querySelectorAll('.browse-filter-row .filter-btn').forEach(b =>
+      b.classList.remove('active-all', 'active-up', 'active-down'));
+  }
+
+  function setPctFilter(preset, btn) {
+    _browseFilter = { ...PCT_PRESETS[preset] };
+    _clearFilterBtns();
+    document.getElementById('filter-pct-min').value = '';
+    document.getElementById('filter-pct-max').value = '';
+    const isUp = ['gainers','up1','up2','up5'].includes(preset);
+    btn.classList.add(isUp ? 'active-up' : ['losers','down1','down2','down5'].includes(preset) ? 'active-down' : 'active-all');
+    filterBrowse(document.getElementById('browse-search').value);
+  }
+
+  function applyCustomPctFilter() {
+    const min = document.getElementById('filter-pct-min').value;
+    const max = document.getElementById('filter-pct-max').value;
+    _browseFilter = { min: min !== '' ? parseFloat(min) : null, max: max !== '' ? parseFloat(max) : null };
+    _clearFilterBtns();
+    filterBrowse(document.getElementById('browse-search').value);
+  }
+
+  function applyPctFilter(cards) {
+    const { min, max } = _browseFilter;
+    if ((min === null && max === null) || !_browsePrices) return cards;
+    return cards.filter(c => {
+      const d = _browsePrices[c.ticker];
+      if (!d) return true;                       // no price yet — keep card
+      if (min !== null && d.pct < min) return false;
+      if (max !== null && d.pct > max) return false;
+      return true;
+    });
+  }
 
   async function openBrowseModal() {
     const selected = new Set(
@@ -1216,8 +1303,15 @@
         .map(([ticker, etfs]) => ({ ticker, etfs, name: allNames[ticker] || '' }))
         .sort((a, b) => maxWeight(b.etfs) - maxWeight(a.etfs) || a.ticker.localeCompare(b.ticker));
       _browsePrices = null;
+      _browseFilter = { min: null, max: null };
 
       document.getElementById('browse-search').value = '';
+      document.getElementById('filter-pct-min').value = '';
+      document.getElementById('filter-pct-max').value = '';
+      document.querySelectorAll('.browse-filter-row .filter-btn').forEach((b, i) => {
+        b.classList.remove('active-up', 'active-down', 'active-all');
+        if (i === 0) b.classList.add('active-all'); // "All" button
+      });
       document.getElementById('browse-modal').classList.remove('hidden');
       renderBrowseCards(_browseCards);
       document.getElementById('browse-search').focus();
@@ -1232,7 +1326,7 @@
         .then(r => r.json())
         .then(prices => {
           _browsePrices = prices;
-          applyPricesToCards(prices);
+          filterBrowse(document.getElementById('browse-search').value);
         })
         .catch(() => {});
     } catch(e) {
@@ -1280,35 +1374,29 @@
 
   function applyPricesToCards(prices) {
     document.querySelectorAll('#browse-grid .browse-card').forEach(card => {
-      try {
-        const ticker = card.dataset.ticker;
-        const d = prices[ticker];
-
-        const priceEl = card.querySelector('.browse-price');
-        if (priceEl) {
-          if (d == null) { priceEl.textContent = '—'; }
-          else {
-            const arrow = d.change > 0 ? '▲' : d.change < 0 ? '▼' : '';
-            const color = d.change > 0 ? 'var(--green)' : d.change < 0 ? 'var(--danger)' : 'var(--muted)';
-            priceEl.innerHTML =
-              `<span style="color:var(--text);font-weight:600">$${d.price.toFixed(2)}</span>` +
-              (arrow ? ` <span style="color:${color};font-size:11px">${arrow} ${Math.abs(d.pct).toFixed(2)}%</span>` : '');
-          }
+      const d       = prices[card.dataset.ticker];
+      const priceEl = card.querySelector('.browse-price');
+      if (priceEl) {
+        if (!d) { priceEl.textContent = '—'; }
+        else {
+          const arrow = d.change > 0 ? '▲' : d.change < 0 ? '▼' : '';
+          const color = d.change > 0 ? 'var(--green)' : d.change < 0 ? 'var(--danger)' : 'var(--muted)';
+          priceEl.innerHTML = `<span style="color:var(--text);font-weight:600">$${d.price.toFixed(2)}</span>` +
+            (arrow ? ` <span style="color:${color};font-size:11px">${arrow} ${Math.abs(d.pct).toFixed(2)}%</span>` : '');
         }
-
-        const maEl = card.querySelector('.browse-ma');
-        if (maEl && d) {
-          const ma20str = d.ma20 != null ? `MA20 $${d.ma20.toFixed(2)}` : '';
-          const ma50str = d.ma50 != null ? `MA50 $${d.ma50.toFixed(2)}` : '';
-          maEl.textContent = [ma20str, ma50str].filter(Boolean).join('  ·  ');
-        }
-      } catch(e) { console.error('applyPricesToCards error for', card.dataset.ticker, e); }
+      }
+      const maEl = card.querySelector('.browse-ma');
+      if (maEl && d) {
+        maEl.textContent = [d.ma20 && `MA20 $${d.ma20.toFixed(2)}`, d.ma50 && `MA50 $${d.ma50.toFixed(2)}`]
+          .filter(Boolean).join('  ·  ');
+      }
     });
   }
 
   function filterBrowse(q) {
     const term = q.trim().toUpperCase();
-    renderBrowseCards(term ? _browseCards.filter(c => c.ticker.includes(term)) : _browseCards);
+    const byText = term ? _browseCards.filter(c => c.ticker.includes(term)) : _browseCards;
+    renderBrowseCards(applyPctFilter(byText));
     if (_browsePrices) applyPricesToCards(_browsePrices);
   }
 
@@ -1331,12 +1419,10 @@
       const data = await res.json();
 
       const dot = `<span style="color:var(--muted)">·</span>`;
-      document.getElementById('news-sa-links').innerHTML =
-        `<a class="news-sa-link" href="${data.yf_url}"   target="_blank" rel="noopener">Yahoo Finance ↗</a>` + dot +
-        `<a class="news-sa-link" href="${data.sa_url}"   target="_blank" rel="noopener">Stock Analysis ↗</a>` + dot +
-        `<a class="news-sa-link" href="${data.sea_url}"  target="_blank" rel="noopener">Seeking Alpha ↗</a>` + dot +
-        `<a class="news-sa-link" href="${data.mw_url}"   target="_blank" rel="noopener">MarketWatch ↗</a>` + dot +
-        `<a class="news-sa-link" href="${data.cnbc_url}" target="_blank" rel="noopener">CNBC ↗</a>`;
+      document.getElementById('news-sa-links').innerHTML = [
+        ['Yahoo Finance', data.yf_url], ['Stock Analysis', data.sa_url],
+        ['Seeking Alpha', data.sea_url], ['MarketWatch', data.mw_url], ['CNBC', data.cnbc_url],
+      ].map(([n, u]) => `<a class="news-sa-link" href="${u}" target="_blank" rel="noopener">${n} ↗</a>`).join(dot);
 
       document.getElementById('news-loading').classList.add('hidden');
       const articles = data.news || [];
