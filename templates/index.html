@@ -233,6 +233,7 @@
       color: var(--blue);
       letter-spacing: .3px;
     }
+    .ticker-sym:hover { text-decoration: underline; }
 
     /* Pill meters */
     .meter {
@@ -995,7 +996,7 @@
         <td><span class="rank">${i + 1}</span></td>
         <td>
           <div class="ticker-cell">
-            <span class="ticker-sym">${r.ticker}</span>
+            <span class="ticker-sym" style="cursor:pointer" onclick="openNewsModal('${r.ticker}')">${r.ticker}</span>
           </div>
         </td>
         <td>${etfBadges}</td>
