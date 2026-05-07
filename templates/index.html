@@ -1462,8 +1462,14 @@
     const status = document.getElementById('ah-status');
     if (!enabled) {
       _ahData = null;
+      _ahFilterOnly = false;
       status.textContent = '';
+      const fb = document.getElementById('ah-filter-btn');
+      fb.style.display = 'none';
+      fb.classList.remove('active-up');
+      fb.textContent = 'Show only movers';
       applyAfterHours();
+      filterBrowse(document.getElementById('browse-search').value);
       return;
     }
     status.textContent = 'Fetching…';
