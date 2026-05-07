@@ -522,6 +522,15 @@
       cursor: pointer; font-size: 11px; padding: 0 2px; line-height: 1;
     }
     .research-remove:hover { color: var(--danger); }
+    .research-ticker-link {
+      font-size: 13px; font-weight: 700; color: var(--blue);
+      cursor: pointer; padding: 0 3px;
+    }
+    .research-ticker-link:hover { text-decoration: underline; }
+    .news-price-bar {
+      display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap;
+      padding: 12px 0 10px; border-bottom: 1px solid var(--border); margin-bottom: 4px;
+    }
 
     /* ── News modal ──────────────────────────────────────────────────── */
     .news-list {
@@ -791,6 +800,7 @@
       <button class="modal-close" onclick="closeNewsModal()">✕</button>
     </div>
     <div class="modal-body" id="news-modal-body" style="padding:0 24px 8px">
+      <div id="news-price-bar" class="news-price-bar hidden"></div>
       <div id="news-loading" style="padding:24px 0;text-align:center;color:var(--muted);">Loading…</div>
       <ul id="news-list" class="news-list hidden"></ul>
       <div id="news-empty" class="hidden" style="padding:24px 0;text-align:center;color:var(--muted);">No recent news found.</div>
@@ -865,9 +875,10 @@
         <div class="etf-group-checks">
           ${stocks.map(t => `
             <div class="research-stock-row">
-              <label class="cb-label" style="border-color:#a371f744">
-                <input type="checkbox" class="research-check" value="${t}" checked> ${t}
+              <label class="cb-label" style="border-color:#a371f744;padding:5px 10px">
+                <input type="checkbox" class="research-check" value="${t}" checked>
               </label>
+              <span class="research-ticker-link" onclick="openNewsModal('${t}')">${t}</span>
               <button class="research-remove" onclick="removeFromResearch('${t}')" title="Remove">✕</button>
             </div>`).join('')}
         </div>
@@ -1397,7 +1408,8 @@
 
   // ── News modal ────────────────────────────────────────────────────
   async function openNewsModal(ticker) {
-    document.getElementById('news-modal-title').textContent = `📰 News — ${ticker}`;
+    document.getElementById('news-modal-title').textContent = `📰 ${ticker}`;
+    document.getElementById('news-price-bar').classList.add('hidden');
     document.getElementById('news-loading').classList.remove('hidden');
     document.getElementById('news-list').classList.add('hidden');
     document.getElementById('news-empty').classList.add('hidden');
@@ -1405,9 +1417,30 @@
     document.getElementById('news-modal').classList.remove('hidden');
 
     try {
-      const res  = await fetch(`/api/news/${encodeURIComponent(ticker)}`);
-      const data = await res.json();
+      const [newsRes, priceRes] = await Promise.all([
+        fetch(`/api/news/${encodeURIComponent(ticker)}`),
+        fetch('/api/prices', { method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ tickers: [ticker] }) }),
+      ]);
+      const data   = await newsRes.json();
+      const prices = await priceRes.json();
 
+      // Price bar
+      const d = prices[ticker];
+      if (d) {
+        const arrow = d.change > 0 ? '▲' : d.change < 0 ? '▼' : '';
+        const color = d.change > 0 ? 'var(--green)' : d.change < 0 ? 'var(--danger)' : 'var(--muted)';
+        const sign  = d.change > 0 ? '+' : '';
+        document.getElementById('news-price-bar').innerHTML =
+          `<span style="font-size:22px;font-weight:700;color:var(--text)">$${d.price.toFixed(2)}</span>` +
+          (arrow ? `<span style="color:${color};font-weight:700;font-size:15px">${arrow} ${Math.abs(d.pct).toFixed(2)}%</span>
+                    <span style="color:${color};font-size:13px">(${sign}${d.change.toFixed(2)})</span>` : '') +
+          (d.ma20 ? `<span style="font-size:12px;color:var(--muted)">MA20 $${d.ma20.toFixed(2)}</span>` : '') +
+          (d.ma50 ? `<span style="font-size:12px;color:var(--muted)">MA50 $${d.ma50.toFixed(2)}</span>` : '');
+        document.getElementById('news-price-bar').classList.remove('hidden');
+      }
+
+      // External links
       const dot = `<span style="color:var(--muted)">·</span>`;
       document.getElementById('news-sa-links').innerHTML = [
         ['Yahoo Finance', data.yf_url], ['Stock Analysis', data.sa_url],
