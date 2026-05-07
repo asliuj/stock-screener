@@ -873,6 +873,10 @@
   // VolRatio bar: 2–10 → 0–100%
   function volPct(vr)  { return Math.min(100, Math.max(0, (vr - 2) / 8 * 100)); }
 
+  // Shared change-color helper and intel row builder
+  const _chg = ch => ({ arrow: ch > 0 ? '▲' : ch < 0 ? '▼' : '', color: ch > 0 ? 'var(--green)' : ch < 0 ? 'var(--danger)' : 'var(--muted)' });
+  const _ir  = (label, val, vs = '') => `<div class="intel-row"><span class="intel-label">${label}</span><span class="intel-val"${vs ? ` style="${vs}"` : ''}>${val}</span></div>`;
+
   // ── Research Stocks ───────────────────────────────────────────────
   const RESEARCH_KEY = 'screener_research_stocks';
   const getResearch  = () => { try { return JSON.parse(localStorage.getItem(RESEARCH_KEY) || '[]'); } catch { return []; } };
@@ -1407,22 +1411,19 @@
 
   function applyPricesToCards(prices) {
     document.querySelectorAll('#browse-grid .browse-card').forEach(card => {
-      const d       = prices[card.dataset.ticker];
+      const d = prices[card.dataset.ticker];
       const priceEl = card.querySelector('.browse-price');
       if (priceEl) {
         if (!d) { priceEl.textContent = '—'; }
         else {
-          const arrow = d.change > 0 ? '▲' : d.change < 0 ? '▼' : '';
-          const color = d.change > 0 ? 'var(--green)' : d.change < 0 ? 'var(--danger)' : 'var(--muted)';
+          const { arrow, color } = _chg(d.change);
           priceEl.innerHTML = `<span style="color:var(--text);font-weight:600">$${d.price.toFixed(2)}</span>` +
             (arrow ? ` <span style="color:${color};font-size:11px">${arrow} ${Math.abs(d.pct).toFixed(2)}%</span>` : '');
         }
       }
       const maEl = card.querySelector('.browse-ma');
-      if (maEl && d) {
-        maEl.textContent = [d.ma20 && `MA20 $${d.ma20.toFixed(2)}`, d.ma50 && `MA50 $${d.ma50.toFixed(2)}`]
-          .filter(Boolean).join('  ·  ');
-      }
+      if (maEl && d)
+        maEl.textContent = [d.ma20 && `MA20 $${d.ma20.toFixed(2)}`, d.ma50 && `MA50 $${d.ma50.toFixed(2)}`].filter(Boolean).join('  ·  ');
     });
   }
 
@@ -1460,16 +1461,15 @@
       // Price bar
       const d = prices[ticker];
       if (d) {
-        const arrow = d.change > 0 ? '▲' : d.change < 0 ? '▼' : '';
-        const color = d.change > 0 ? 'var(--green)' : d.change < 0 ? 'var(--danger)' : 'var(--muted)';
-        const sign  = d.change > 0 ? '+' : '';
-        document.getElementById('news-price-bar').innerHTML =
+        const { arrow, color } = _chg(d.change);
+        const bar = document.getElementById('news-price-bar');
+        bar.innerHTML =
           `<span style="font-size:22px;font-weight:700;color:var(--text)">$${d.price.toFixed(2)}</span>` +
           (arrow ? `<span style="color:${color};font-weight:700;font-size:15px">${arrow} ${Math.abs(d.pct).toFixed(2)}%</span>
-                    <span style="color:${color};font-size:13px">(${sign}${d.change.toFixed(2)})</span>` : '') +
+                    <span style="color:${color};font-size:13px">(${d.change > 0 ? '+' : ''}${d.change.toFixed(2)})</span>` : '') +
           (d.ma20 ? `<span style="font-size:12px;color:var(--muted)">MA20 $${d.ma20.toFixed(2)}</span>` : '') +
           (d.ma50 ? `<span style="font-size:12px;color:var(--muted)">MA50 $${d.ma50.toFixed(2)}</span>` : '');
-        document.getElementById('news-price-bar').classList.remove('hidden');
+        bar.classList.remove('hidden');
       }
 
       // External links
@@ -1510,14 +1510,11 @@
 
   // ── Market Intel modal ────────────────────────────────────────────
   function _intelQuoteRow(label, q) {
-    const arrow = q.change > 0 ? '▲' : q.change < 0 ? '▼' : '';
-    const color = q.change > 0 ? 'var(--green)' : q.change < 0 ? 'var(--danger)' : 'var(--muted)';
-    return `<div class="intel-row">
-      <span class="intel-label">${label}</span>
-      <span class="intel-val">$${q.price.toFixed(2)}
-        ${arrow ? `<span style="color:${color};margin-left:6px">${arrow} ${Math.abs(q.pct).toFixed(2)}%
-                   <span style="opacity:.7">(${q.change > 0 ? '+' : ''}${q.change.toFixed(2)})</span></span>` : ''}
-      </span></div>`;
+    const { arrow, color } = _chg(q.change);
+    const val = `$${q.price.toFixed(2)}` + (arrow
+      ? ` <span style="color:${color};margin-left:6px">${arrow} ${Math.abs(q.pct).toFixed(2)}%
+           <span style="opacity:.7">(${q.change > 0 ? '+' : ''}${q.change.toFixed(2)})</span></span>` : '');
+    return _ir(label, val);
   }
 
   function _fmtDate(d) {
@@ -1573,28 +1570,21 @@
       // Volume
       const v = data.volume;
       if (v) {
-        const ratio = v.ratio;
-        const ratioColor = ratio >= 2 ? 'var(--warn)' : ratio >= 1.5 ? 'var(--text)' : 'var(--muted)';
+        const rc = v.ratio >= 2 ? 'var(--warn)' : v.ratio >= 1.5 ? 'var(--text)' : 'var(--muted)';
         html += `<div class="intel-section"><div class="intel-section-title">📊 Volume</div>
-          <div class="intel-row"><span class="intel-label">Today</span>
-            <span class="intel-val">${fmtVol(v.today)}</span></div>
-          ${v.avg ? `<div class="intel-row"><span class="intel-label">Avg (3mo)</span>
-            <span class="intel-val" style="color:var(--muted)">${fmtVol(v.avg)}</span></div>` : ''}
-          ${ratio != null ? `<div class="intel-row"><span class="intel-label">vs Average</span>
-            <span class="intel-val" style="color:${ratioColor};font-weight:700">${ratio.toFixed(2)}×</span></div>` : ''}
+          ${_ir('Today', fmtVol(v.today))}
+          ${v.avg   ? _ir('Avg (3mo)', fmtVol(v.avg), 'color:var(--muted)') : ''}
+          ${v.ratio != null ? _ir('vs Average', v.ratio.toFixed(2) + '×', `color:${rc};font-weight:700`) : ''}
         </div>`;
       }
 
       // Earnings
       const e = data.earnings;
-      if (e && e.next_date) {
+      if (e?.next_date) {
         html += `<div class="intel-section"><div class="intel-section-title">📅 Earnings</div>
-          <div class="intel-row"><span class="intel-label">Next Date</span>
-            <span class="intel-val">${_fmtDate(e.next_date)}</span></div>
-          ${e.eps_estimate != null ? `<div class="intel-row"><span class="intel-label">EPS Estimate</span>
-            <span class="intel-val">$${e.eps_estimate.toFixed(2)}</span></div>` : ''}
-          ${e.revenue_estimate != null ? `<div class="intel-row"><span class="intel-label">Revenue Est.</span>
-            <span class="intel-val">${_fmtLarge(e.revenue_estimate)}</span></div>` : ''}
+          ${_ir('Next Date', _fmtDate(e.next_date))}
+          ${e.eps_estimate     != null ? _ir('EPS Estimate', '$' + e.eps_estimate.toFixed(2)) : ''}
+          ${e.revenue_estimate != null ? _ir('Revenue Est.', _fmtLarge(e.revenue_estimate)) : ''}
         </div>`;
       }
 
@@ -1603,23 +1593,17 @@
       if (a && (a.target_mean || a.rec)) {
         const upside = a.current && a.target_mean
           ? ((a.target_mean - a.current) / a.current * 100).toFixed(1) : null;
+        const uColor = parseFloat(upside) >= 0 ? 'var(--green)' : 'var(--danger)';
         html += `<div class="intel-section">
           <div class="intel-section-title">🎯 Analyst Consensus${a.n ? ` <span style="font-weight:400">(${a.n} analysts)</span>` : ''}</div>
-          ${a.rec ? `<div class="intel-row"><span class="intel-label">Recommendation</span>
-            <span class="intel-val" style="color:${_recColor(a.rec)}">${a.rec}</span></div>` : ''}
-          ${a.target_mean ? `<div class="intel-row"><span class="intel-label">Price Target</span>
-            <span class="intel-val">$${a.target_mean.toFixed(2)}
-              <span style="color:var(--muted);font-size:12px;font-weight:400">
-                (Low $${a.target_low?.toFixed(2) || '?'} · High $${a.target_high?.toFixed(2) || '?'})
-              </span></span></div>` : ''}
-          ${upside != null ? `<div class="intel-row"><span class="intel-label">Upside to Target</span>
-            <span class="intel-val" style="color:${parseFloat(upside) >= 0 ? 'var(--green)' : 'var(--danger)'}">
-              ${upside >= 0 ? '+' : ''}${upside}%</span></div>` : ''}
+          ${a.rec ? _ir('Recommendation', a.rec, `color:${_recColor(a.rec)}`) : ''}
+          ${a.target_mean ? _ir('Price Target', `$${a.target_mean.toFixed(2)} <span style="color:var(--muted);font-size:12px;font-weight:400">(Low $${a.target_low?.toFixed(2)||'?'} · High $${a.target_high?.toFixed(2)||'?'})</span>`) : ''}
+          ${upside != null ? _ir('Upside to Target', (parseFloat(upside) >= 0 ? '+' : '') + upside + '%', `color:${uColor}`) : ''}
         </div>`;
       }
 
       // Upgrades / downgrades
-      if (data.upgrades && data.upgrades.length > 0) {
+      if (data.upgrades?.length) {
         html += `<div class="intel-section"><div class="intel-section-title">📈 Recent Analyst Actions</div>
           ${data.upgrades.map(u => `
             <div class="intel-row" style="align-items:flex-start">

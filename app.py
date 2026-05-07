@@ -129,19 +129,12 @@ def _safe_name(val) -> str:
     return s if s not in ("", "nan", "-", "None") else ""
 
 def _safe_float(val) -> float:
-    try:
-        v = float(val)
-        return v if np.isfinite(v) else 0.0
-    except (TypeError, ValueError):
-        return 0.0
+    try: v = float(val); return v if np.isfinite(v) else 0.0
+    except (TypeError, ValueError): return 0.0
 
 def _safe_val(v) -> float | None:
-    """Like _safe_float but returns None for missing/zero/invalid values."""
-    try:
-        x = float(v)
-        return round(x, 4) if np.isfinite(x) and x != 0 else None
-    except (TypeError, ValueError):
-        return None
+    try: x = float(v); return round(x, 4) if np.isfinite(x) and x else None
+    except (TypeError, ValueError): return None
 
 
 _INVALID_TICKER = frozenset(("", "-", "nan", "<NA>", "None"))
@@ -387,10 +380,9 @@ def get_universe(universes: list[str]) -> list[str]:
 
 def compute_rsi(closes: pd.Series, period: int = RSI_PERIOD) -> float:
     try:
-        if len(closes) < period + 1:
-            return np.nan
-        val = RSIIndicator(close=closes, window=period).rsi().iloc[-1]
-        return float(val) if not np.isnan(val) else np.nan
+        if len(closes) < period + 1: return np.nan
+        v = RSIIndicator(close=closes, window=period).rsi().iloc[-1]
+        return float(v) if not np.isnan(v) else np.nan
     except Exception:
         return np.nan
 
@@ -414,11 +406,12 @@ def _yf_download(tickers, max_retries: int = 3, **kwargs):
 def _fetch_history_stooq(ticker: str, days: int = 90) -> pd.DataFrame | None:
     """Fetch daily OHLCV from Stooq as a fallback when yfinance is rate limited."""
     try:
-        end   = datetime.now().strftime("%Y%m%d")
-        start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        sym   = ticker.replace("-", ".").lower()
-        url   = f"https://stooq.com/q/d/l/?s={sym}.us&d1={start}&d2={end}&i=d"
-        resp  = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        now  = datetime.now()
+        sym  = ticker.replace("-", ".").lower()
+        url  = (f"https://stooq.com/q/d/l/?s={sym}.us"
+                f"&d1={(now - timedelta(days=days)).strftime('%Y%m%d')}"
+                f"&d2={now.strftime('%Y%m%d')}&i=d")
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
         if resp.status_code != 200 or "No data" in resp.text[:50]:
             return None
         df = pd.read_csv(StringIO(resp.text), parse_dates=["Date"]).sort_values("Date")
@@ -801,37 +794,29 @@ def api_extended(ticker):
         try:
             cal = tkr.calendar
             if cal:
-                if isinstance(cal, dict):
-                    dates = cal.get("Earnings Date") or []
-                    out["earnings"] = {
-                        "next_date":        str(dates[0])[:10] if dates else None,
-                        "eps_estimate":     _safe_val(cal.get("Earnings Average") or cal.get("EPS Estimate")),
-                        "revenue_estimate": _safe_val(cal.get("Revenue Average") or cal.get("Revenue Estimate")),
-                    }
-                elif hasattr(cal, "empty") and not cal.empty:
-                    col = cal.columns[0]
-                    d   = cal[col].to_dict() if hasattr(cal[col], "to_dict") else {}
-                    dates = d.get("Earnings Date")
-                    out["earnings"] = {
-                        "next_date":        str(dates)[:10] if dates else None,
-                        "eps_estimate":     _safe_val(d.get("Earnings Average") or d.get("EPS Estimate")),
-                        "revenue_estimate": _safe_val(d.get("Revenue Average") or d.get("Revenue Estimate")),
-                    }
+                d = cal if isinstance(cal, dict) else cal[cal.columns[0]].to_dict()
+                dates = d.get("Earnings Date") or []
+                if not isinstance(dates, (list, tuple)): dates = [dates]
+                out["earnings"] = {
+                    "next_date":        str(dates[0])[:10] if dates else None,
+                    "eps_estimate":     _safe_val(d.get("Earnings Average") or d.get("EPS Estimate")),
+                    "revenue_estimate": _safe_val(d.get("Revenue Average") or d.get("Revenue Estimate")),
+                }
         except Exception:
             pass
 
         # Analyst consensus — reuse info already fetched above
         if info:
-            rec = (info.get("recommendationKey") or "").replace("_", " ").title()
+            rec = (info.get("recommendationKey") or "").replace("_", " ").title() or None
             analyst = {
-                "target_mean":  _safe_val(info.get("targetMeanPrice")),
-                "target_low":   _safe_val(info.get("targetLowPrice")),
-                "target_high":  _safe_val(info.get("targetHighPrice")),
-                "rec":          rec or None,
-                "n":            info.get("numberOfAnalystOpinions"),
-                "current":      _safe_val(info.get("currentPrice")) or (last if last else None),
+                "target_mean": _safe_val(info.get("targetMeanPrice")),
+                "target_low":  _safe_val(info.get("targetLowPrice")),
+                "target_high": _safe_val(info.get("targetHighPrice")),
+                "rec":         rec,
+                "n":           info.get("numberOfAnalystOpinions"),
+                "current":     _safe_val(info.get("currentPrice")) or last or None,
             }
-            if any(v for v in analyst.values()):
+            if any(analyst.values()):
                 out["analyst"] = analyst
 
         # Analyst upgrades / downgrades
