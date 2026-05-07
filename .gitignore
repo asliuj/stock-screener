@@ -9,6 +9,7 @@ venv/
 # App-generated files
 holdings_cache.json
 refresh.log
+backup.log
 *.log
 
 # Claude Code
