@@ -517,6 +517,18 @@
     .browse-card-btn:hover { border-color: var(--blue); color: var(--blue); }
     .browse-card-btn.added { border-color: var(--green); color: var(--green); }
     .browse-card-buttons { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+    .ah-badge {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 10px; font-weight: 700; padding: 1px 5px;
+      border-radius: 10px; margin-left: 5px; vertical-align: middle;
+    }
+    .ah-up   { background: #2386361a; border: 1px solid #23863640; color: var(--green); }
+    .ah-down { background: #da36331a; border: 1px solid #da363640; color: var(--danger); }
+    .ah-toggle-row {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 10px; font-size: 12px; color: var(--muted);
+    }
+    #ah-status { font-size: 11px; color: var(--muted); }
     .research-stock-row { display: flex; align-items: center; gap: 3px; }
     .research-remove {
       background: none; border: none; color: var(--muted);
@@ -787,6 +799,13 @@
       <div class="browse-search-wrap">
         <input id="browse-search" type="text" placeholder="Search ticker…" oninput="filterBrowse(this.value)">
         <span id="browse-count-label"></span>
+      </div>
+      <div class="ah-toggle-row">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
+          <input type="checkbox" id="ah-toggle" onchange="toggleAfterHours(this.checked)" style="accent-color:var(--warn);cursor:pointer;">
+          ⏰ After-hours alerts <span style="font-size:10px;color:var(--muted)">(≥5% move)</span>
+        </label>
+        <span id="ah-status"></span>
       </div>
       <div class="browse-filter-row">
         <label>% Change:</label>
@@ -1269,6 +1288,7 @@
   let _browseCards  = [];
   let _browsePrices = null;
   let _browseFilter = { min: null, max: null };  // daily % change filter
+  let _ahData       = null;   // after-hours data from /api/afterhours
 
   const PCT_PRESETS = {
     all:     { min: null, max: null },
@@ -1391,8 +1411,9 @@
         return `<span class="etf-badge" title="${ETF_NAMES[etf.toLowerCase()] || etf}">${wLabel}</span>`;
       }).join('');
       return `<div class="browse-card" data-ticker="${c.ticker}">
-        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;">
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
           <div class="browse-card-ticker"><a href="${yf(c.ticker)}" target="_blank" rel="noopener">${c.ticker}</a></div>
+          <span class="ah-badge" id="ah-${c.ticker}" style="display:none"></span>
           <div class="browse-price" style="font-size:12px;color:var(--muted);">…</div>
         </div>
         <div class="browse-card-etfs" style="margin-bottom:4px">${badges}</div>
@@ -1432,10 +1453,54 @@
     const byText = term ? _browseCards.filter(c => c.ticker.includes(term)) : _browseCards;
     renderBrowseCards(applyPctFilter(byText));
     if (_browsePrices) applyPricesToCards(_browsePrices);
+    applyAfterHours();
+  }
+
+  async function toggleAfterHours(enabled) {
+    const status = document.getElementById('ah-status');
+    if (!enabled) {
+      _ahData = null;
+      status.textContent = '';
+      applyAfterHours();
+      return;
+    }
+    status.textContent = 'Fetching…';
+    const tickers = _browseCards.map(c => c.ticker);
+    try {
+      const res = await fetch('/api/afterhours', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickers }),
+      });
+      _ahData = await res.json();
+      const movers = Object.values(_ahData).filter(v => Math.abs(v.pct) >= 5).length;
+      status.textContent = movers > 0 ? `${movers} stock${movers !== 1 ? 's' : ''} with ≥5% move` : 'No significant movers';
+    } catch(e) {
+      status.textContent = 'Failed to load';
+      _ahData = null;
+    }
+    applyAfterHours();
+  }
+
+  function applyAfterHours() {
+    document.querySelectorAll('#browse-grid .browse-card').forEach(card => {
+      const badge = card.querySelector('.ah-badge');
+      if (!badge) return;
+      const d = _ahData?.[card.dataset.ticker];
+      if (!d || Math.abs(d.pct) < 5) { badge.style.display = 'none'; return; }
+      const up = d.pct > 0;
+      badge.className = `ah-badge ${up ? 'ah-up' : 'ah-down'}`;
+      badge.textContent = `${up ? '▲' : '▼'} ${Math.abs(d.pct).toFixed(1)}% AH`;
+      badge.style.display = '';
+    });
   }
 
   function closeBrowseModal() {
     document.getElementById('browse-modal').classList.add('hidden');
+    const toggle = document.getElementById('ah-toggle');
+    if (toggle) toggle.checked = false;
+    document.getElementById('ah-status').textContent = '';
+    _ahData = null;
   }
 
 

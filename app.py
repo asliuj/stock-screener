@@ -841,6 +841,47 @@ def api_extended(ticker):
     return jsonify(out)
 
 
+@app.route("/api/afterhours", methods=["POST"])
+def api_afterhours():
+    """Batch after-hours price check vs regular close. Only returns tickers with extended-hours data."""
+    tickers = (request.get_json(silent=True) or {}).get("tickers", [])
+    if not tickers:
+        return jsonify({})
+
+    result = {}
+    for i in range(0, len(tickers), BATCH_SIZE):
+        batch = tickers[i:i + BATCH_SIZE]
+        try:
+            ext = _yf_download(batch, period="1d", interval="5m", prepost=True)
+            reg = _yf_download(batch, period="5d", interval="1d")
+            for ticker in batch:
+                try:
+                    if ticker not in ext.columns.get_level_values(0): continue
+                    if ticker not in reg.columns.get_level_values(0): continue
+                    ext_c = ext[ticker]["Close"].dropna()
+                    reg_c = reg[ticker]["Close"].dropna()
+                    if ext_c.empty or reg_c.empty: continue
+                    # Skip if last bar is still within regular market hours (9:30am–4pm ET)
+                    last = ext_c.index[-1]
+                    if getattr(last, "tz", None):
+                        et   = last.tz_convert("America/New_York")
+                        hhmm = et.hour * 100 + et.minute
+                        if 930 <= hhmm < 1600: continue
+                    reg_close = float(reg_c.iloc[-1])
+                    ah_price  = float(ext_c.iloc[-1])
+                    if not reg_close: continue
+                    pct = round((ah_price - reg_close) / reg_close * 100, 2)
+                    if abs(pct) >= 0.01:
+                        result[ticker] = {"price": round(ah_price, 2), "pct": pct}
+                except Exception:
+                    pass
+        except Exception as e:
+            log.warning(f"After-hours batch failed: {e}")
+        if i + BATCH_SIZE < len(tickers):
+            time.sleep(1.0)
+    return jsonify(result)
+
+
 @app.route("/api/results")
 def api_results():
     with _lock:
