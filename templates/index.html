@@ -1472,6 +1472,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tickers }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       _ahData = await res.json();
       const movers = Object.values(_ahData).filter(v => Math.abs(v.pct) >= 5).length;
       status.textContent = movers > 0 ? `${movers} stock${movers !== 1 ? 's' : ''} with ≥5% move` : 'No significant movers';
