@@ -325,9 +325,7 @@ def load_holdings_cache() -> bool:
             _weights.clear();  _weights.update(data.get("weights", {}))
             _names.clear();    _names.update(data.get("names", {}))
             _holdings_meta["updated"] = updated
-        d = datetime.strptime(updated, "%Y-%m-%d")
-        now = datetime.now()
-        return d.year == now.year and d.month == now.month
+        return updated[:7] == datetime.now().strftime("%Y-%m")
     except Exception as e:
         log.warning(f"Could not load holdings cache: {e}")
         return False
@@ -373,10 +371,8 @@ def refresh_holdings():
 
 
 def get_universe(universes: list[str]) -> list[str]:
-    """Build deduplicated ticker universe from selected ETFs."""
     with _holdings_lock:
-        tickers = [t for etf in universes for t in _holdings.get(etf.lower(), [])]
-    combined = list(dict.fromkeys(tickers))
+        combined = list(dict.fromkeys(t for etf in universes for t in _holdings.get(etf.lower(), [])))
     log.info(f"Universe: {len(combined)} tickers from {', '.join(universes)}")
     return combined
 
@@ -457,14 +453,11 @@ def screen_batch(tickers: list[str], pe_max: float, rsi_min: float, rsi_max: flo
         log.warning(f"yfinance batch failed ({e}); falling back to Stooq per-ticker")
         ticker_data = {t: df for t in tickers if (df := _fetch_history_stooq(t)) is not None}
 
-    def _get_df(ticker: str) -> pd.DataFrame | None:
-        return ticker_data.get(ticker)
-
     # Pass 1: RSI + volume filter
     survivors: list[tuple[str, float, float, float, float, float]] = []
     for ticker in tickers:
         try:
-            df = _get_df(ticker)
+            df = ticker_data.get(ticker)
             if df is None:
                 continue
             df = df.dropna(subset=["Close", "Volume"])
@@ -684,7 +677,7 @@ def api_etf_performance():
     except Exception as e:
         log.warning(f"ETF performance fetch failed: {e}")
         with _perf_lock:
-            return jsonify(_perf_state["cache"] or {e: {"ytd": None, "daily": None, "price": None} for e in ALL_ETFS})
+            return jsonify(_perf_state["cache"] or {etf: {"ytd": None, "daily": None, "price": None} for etf in ALL_ETFS})
     with _perf_lock:
         _perf_state["cache"].clear()
         _perf_state["cache"].update(result)

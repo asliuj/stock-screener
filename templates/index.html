@@ -808,9 +808,7 @@
   let isRunning = false;
 
   // ── Helpers ───────────────────────────────────────────────────────
-  function fmtNum(n, dec = 2) {
-    return n !== null && n !== undefined ? Number(n).toFixed(dec) : '—';
-  }
+  function fmtNum(n, dec = 2) { return n != null ? Number(n).toFixed(dec) : '—'; }
   function fmtVol(n) {
     if (!n) return '—';
     if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
@@ -1145,10 +1143,9 @@
     document.getElementById('holdings-icon').textContent = icons[data.status] || '❓';
     document.getElementById('holdings-msg').textContent  = data.message || '';
     if (data.updated) {
-      const etfCount    = Object.keys(data.counts || {}).length;
-      const totalStocks = Object.values(data.counts || {}).reduce((a, b) => a + b, 0);
+      const counts = data.counts || {};
       document.getElementById('holdings-updated').textContent =
-        `${etfCount} ETFs · ${totalStocks.toLocaleString()} stocks`;
+        `${Object.keys(counts).length} ETFs · ${Object.values(counts).reduce((a,b)=>a+b,0).toLocaleString()} stocks`;
     }
     holdingsReady = data.status === 'ready';
     document.getElementById('run-btn').disabled = !holdingsReady || isRunning;
@@ -1292,10 +1289,8 @@
       const map = {};
       for (const etf of selected) {
         const etfW = allWeights[etf] || {};
-        for (const t of (tickers[etf] || [])) {
-          if (!map[t]) map[t] = [];
-          map[t].push({ etf: etf.toUpperCase(), weight: etfW[t] || 0 });
-        }
+        for (const t of (tickers[etf] || []))
+          (map[t] ??= []).push({ etf: etf.toUpperCase(), weight: etfW[t] || 0 });
       }
 
       const maxWeight = etfs => Math.max(...etfs.map(e => parseFloat(e.weight) || 0));
@@ -1308,10 +1303,8 @@
       document.getElementById('browse-search').value = '';
       document.getElementById('filter-pct-min').value = '';
       document.getElementById('filter-pct-max').value = '';
-      document.querySelectorAll('.browse-filter-row .filter-btn').forEach((b, i) => {
-        b.classList.remove('active-up', 'active-down', 'active-all');
-        if (i === 0) b.classList.add('active-all'); // "All" button
-      });
+      _clearFilterBtns();
+      document.querySelector('.browse-filter-row .filter-btn').classList.add('active-all');
       document.getElementById('browse-modal').classList.remove('hidden');
       renderBrowseCards(_browseCards);
       document.getElementById('browse-search').focus();
@@ -1346,12 +1339,9 @@
     }
     empty.style.display = 'none';
     grid.innerHTML = cards.map(c => {
-      const badges = c.etfs.map(item => {
-        const etf    = typeof item === 'string' ? item : item.etf;
-        const weight = typeof item === 'string' ? 0   : (parseFloat(item.weight) || 0);
-        const wLabel = weight > 0.001
-          ? `${etf} <span style="opacity:.75">${weight.toFixed(2)}%</span>`
-          : etf;
+      const badges = c.etfs.map(({ etf, weight = 0 }) => {
+        const w = parseFloat(weight) || 0;
+        const wLabel = w > 0.001 ? `${etf} <span style="opacity:.75">${w.toFixed(2)}%</span>` : etf;
         return `<span class="etf-badge" title="${ETF_NAMES[etf.toLowerCase()] || etf}">${wLabel}</span>`;
       }).join('');
       return `<div class="browse-card" data-ticker="${c.ticker}">
