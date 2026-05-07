@@ -806,6 +806,7 @@
           ⏰ After-hours alerts <span style="font-size:10px;color:var(--muted)">(≥5% move)</span>
         </label>
         <span id="ah-status"></span>
+        <button id="ah-filter-btn" class="filter-btn" onclick="toggleAhFilter()" style="display:none">Show only movers</button>
       </div>
       <div class="browse-filter-row">
         <label>% Change:</label>
@@ -1289,6 +1290,7 @@
   let _browsePrices = null;
   let _browseFilter = { min: null, max: null };  // daily % change filter
   let _ahData       = null;   // after-hours data from /api/afterhours
+  let _ahFilterOnly = false;  // show only AH movers
 
   const PCT_PRESETS = {
     all:     { min: null, max: null },
@@ -1451,7 +1453,7 @@
   function filterBrowse(q) {
     const term = q.trim().toUpperCase();
     const byText = term ? _browseCards.filter(c => c.ticker.includes(term)) : _browseCards;
-    renderBrowseCards(applyPctFilter(byText));
+    renderBrowseCards(applyAhFilter(applyPctFilter(byText)));
     if (_browsePrices) applyPricesToCards(_browsePrices);
     applyAfterHours();
   }
@@ -1476,11 +1478,30 @@
       _ahData = await res.json();
       const movers = Object.values(_ahData).filter(v => Math.abs(v.pct) >= 5).length;
       status.textContent = movers > 0 ? `${movers} stock${movers !== 1 ? 's' : ''} with ≥5% move` : 'No significant movers';
+      document.getElementById('ah-filter-btn').style.display = movers > 0 ? '' : 'none';
     } catch(e) {
       status.textContent = 'Failed to load';
       _ahData = null;
+      document.getElementById('ah-filter-btn').style.display = 'none';
     }
     applyAfterHours();
+    filterBrowse(document.getElementById('browse-search').value);
+  }
+
+  function toggleAhFilter() {
+    _ahFilterOnly = !_ahFilterOnly;
+    const btn = document.getElementById('ah-filter-btn');
+    btn.classList.toggle('active-up', _ahFilterOnly);
+    btn.textContent = _ahFilterOnly ? 'Show all' : 'Show only movers';
+    filterBrowse(document.getElementById('browse-search').value);
+  }
+
+  function applyAhFilter(cards) {
+    if (!_ahFilterOnly || !_ahData) return cards;
+    return cards.filter(c => {
+      const d = _ahData[c.ticker];
+      return d && Math.abs(d.pct) >= 5;
+    });
   }
 
   function applyAfterHours() {
@@ -1501,7 +1522,12 @@
     const toggle = document.getElementById('ah-toggle');
     if (toggle) toggle.checked = false;
     document.getElementById('ah-status').textContent = '';
+    const filterBtn = document.getElementById('ah-filter-btn');
+    filterBtn.style.display = 'none';
+    filterBtn.classList.remove('active-up');
+    filterBtn.textContent = 'Show only movers';
     _ahData = null;
+    _ahFilterOnly = false;
   }
 
 
