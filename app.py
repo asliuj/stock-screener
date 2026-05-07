@@ -135,6 +135,14 @@ def _safe_float(val) -> float:
     except (TypeError, ValueError):
         return 0.0
 
+def _safe_val(v) -> float | None:
+    """Like _safe_float but returns None for missing/zero/invalid values."""
+    try:
+        x = float(v)
+        return round(x, 4) if np.isfinite(x) and x != 0 else None
+    except (TypeError, ValueError):
+        return None
+
 
 _INVALID_TICKER = frozenset(("", "-", "nan", "<NA>", "None"))
 
@@ -744,6 +752,84 @@ def api_news(ticker):
         "cnbc_url": f"https://www.cnbc.com/quotes/{ticker}",
     }
     return jsonify({"news": articles, **links})
+
+
+@app.route("/api/extended/<path:ticker>")
+def api_extended(ticker):
+    """After-hours/pre-market quote, earnings calendar, analyst consensus, and recent upgrades."""
+    ticker = ticker.upper()
+    out = {"post_market": None, "pre_market": None, "earnings": None, "analyst": None, "upgrades": []}
+    try:
+        tkr  = yf.Ticker(ticker)
+        fi   = tkr.fast_info
+        last = _safe_val(getattr(fi, "last_price", None)) or 0
+
+        for key, attr in (("post_market", "post_market_price"), ("pre_market", "pre_market_price")):
+            try:
+                price = _safe_val(getattr(fi, attr, None))
+                if price and price != last:
+                    change = round(price - last, 2) if last else None
+                    pct    = round((price - last) / last * 100, 2) if last else None
+                    out[key] = {"price": price, "change": change, "pct": pct}
+            except Exception:
+                pass
+
+        try:
+            cal = tkr.calendar
+            if cal:
+                if isinstance(cal, dict):
+                    dates = cal.get("Earnings Date") or []
+                    out["earnings"] = {
+                        "next_date":        str(dates[0])[:10] if dates else None,
+                        "eps_estimate":     _safe_val(cal.get("Earnings Average") or cal.get("EPS Estimate")),
+                        "revenue_estimate": _safe_val(cal.get("Revenue Average") or cal.get("Revenue Estimate")),
+                    }
+                elif hasattr(cal, "empty") and not cal.empty:
+                    col = cal.columns[0]
+                    d   = cal[col].to_dict() if hasattr(cal[col], "to_dict") else {}
+                    dates = d.get("Earnings Date")
+                    out["earnings"] = {
+                        "next_date":        str(dates)[:10] if dates else None,
+                        "eps_estimate":     _safe_val(d.get("Earnings Average") or d.get("EPS Estimate")),
+                        "revenue_estimate": _safe_val(d.get("Revenue Average") or d.get("Revenue Estimate")),
+                    }
+        except Exception:
+            pass
+
+        try:
+            info = tkr.info
+            if info:
+                rec = (info.get("recommendationKey") or "").replace("_", " ").title()
+                out["analyst"] = {
+                    "target_mean":  _safe_val(info.get("targetMeanPrice")),
+                    "target_low":   _safe_val(info.get("targetLowPrice")),
+                    "target_high":  _safe_val(info.get("targetHighPrice")),
+                    "rec":          rec or None,
+                    "n":            info.get("numberOfAnalystOpinions"),
+                    "current":      _safe_val(info.get("currentPrice")),
+                }
+        except Exception:
+            pass
+
+        try:
+            ud = tkr.upgrades_downgrades
+            if ud is not None and not ud.empty:
+                ud = ud.sort_index(ascending=False).head(5)
+                out["upgrades"] = [
+                    {"date":   str(idx.date()) if hasattr(idx, "date") else str(idx)[:10],
+                     "firm":   str(row.get("Firm", "")),
+                     "to":     str(row.get("ToGrade", "")),
+                     "from":   str(row.get("FromGrade", "")),
+                     "action": str(row.get("Action", ""))}
+                    for idx, row in ud.iterrows()
+                ]
+        except Exception:
+            pass
+
+    except Exception as e:
+        log.debug(f"Extended data failed for {ticker}: {e}")
+
+    return jsonify(out)
 
 
 @app.route("/api/results")

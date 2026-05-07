@@ -567,6 +567,29 @@
     }
     .news-sa-link:hover { text-decoration: underline; }
 
+    /* ── Market Intel modal ─────────────────────────────────────────── */
+    .intel-section { padding: 14px 0; border-bottom: 1px solid var(--border); }
+    .intel-section:last-child { border-bottom: none; }
+    .intel-section-title {
+      font-size: 11px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px;
+    }
+    .intel-row { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
+    .intel-label { font-size: 13px; color: var(--muted); min-width: 130px; flex-shrink: 0; }
+    .intel-val { font-size: 14px; font-weight: 600; color: var(--text); flex: 1; }
+    .intel-action {
+      display: inline-block; font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 10px; margin-left: 6px; text-transform: uppercase;
+    }
+    .intel-up      { background: #2386361a; border: 1px solid #23863640; color: var(--green); }
+    .intel-down    { background: #da36331a; border: 1px solid #da363340; color: var(--danger); }
+    .intel-neutral { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); }
+    .research-intel-btn {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: 11px; padding: 0 2px; line-height: 1;
+    }
+    .research-intel-btn:hover { color: var(--blue); }
+
     /* ── Footer ─────────────────────────────────────────────────────── */
     footer {
       text-align: center;
@@ -813,6 +836,23 @@
   </div>
 </div>
 
+<!-- ── MARKET INTEL MODAL ────────────────────────────────────────── -->
+<div id="intel-modal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:620px">
+    <div class="modal-header">
+      <span class="modal-title" id="intel-modal-title">📊 Market Intelligence</span>
+      <button class="modal-close" onclick="closeIntelModal()">✕</button>
+    </div>
+    <div class="modal-body" id="intel-modal-body" style="padding:0 24px 8px">
+      <div id="intel-loading" style="padding:24px 0;text-align:center;color:var(--muted);">Loading…</div>
+      <div id="intel-content" class="hidden"></div>
+    </div>
+    <div class="modal-footer" style="justify-content:flex-end">
+      <button onclick="closeIntelModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <script>
   // ── State ─────────────────────────────────────────────────────────
   let pollTimer = null;
@@ -876,6 +916,7 @@
           ${stocks.map(t => `
             <div class="research-stock-row">
               <span class="research-ticker-link" onclick="openNewsModal('${t}')">${t}</span>
+              <button class="research-intel-btn" onclick="openIntelModal('${t}')" title="Market Intel">📊</button>
               <button class="research-remove" onclick="removeFromResearch('${t}')" title="Remove">✕</button>
             </div>`).join('')}
         </div>
@@ -997,6 +1038,7 @@
         <td>
           <div class="ticker-cell">
             <span class="ticker-sym" style="cursor:pointer" onclick="openNewsModal('${r.ticker}')">${r.ticker}</span>
+            <button onclick="openIntelModal('${r.ticker}')" title="Market Intel" style="background:none;border:none;cursor:pointer;font-size:13px;padding:0 3px;color:var(--muted);vertical-align:middle">📊</button>
           </div>
         </td>
         <td>${etfBadges}</td>
@@ -1131,7 +1173,7 @@
   }
 
   // Close modals on backdrop click
-  [['holdings-modal', closeHoldingsModal], ['browse-modal', closeBrowseModal], ['news-modal', closeNewsModal]]
+  [['holdings-modal', closeHoldingsModal], ['browse-modal', closeBrowseModal], ['news-modal', closeNewsModal], ['intel-modal', closeIntelModal]]
     .forEach(([id, fn]) => document.getElementById(id).addEventListener('click', e => { if (e.target.id === id) fn(); }));
 
   // ── Holdings status ───────────────────────────────────────────────
@@ -1354,6 +1396,7 @@
         ${c.name ? `<div style="font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div>` : ''}
         <div class="browse-card-buttons">
           <button class="browse-card-btn" onclick="openNewsModal('${c.ticker}')">📰 News</button>
+          <button class="browse-card-btn" onclick="openIntelModal('${c.ticker}')">📊 Intel</button>
           <button class="browse-card-btn ${isResearch(c.ticker)?'added':''}" id="add-btn-${c.ticker}" onclick="toggleResearch('${c.ticker}', this)">
             ${isResearch(c.ticker) ? '✓ Added' : '+ Portfolio'}
           </button>
@@ -1464,6 +1507,128 @@
     document.getElementById('news-modal').classList.add('hidden');
   }
 
+
+  // ── Market Intel modal ────────────────────────────────────────────
+  function _intelQuoteRow(label, q) {
+    const arrow = q.change > 0 ? '▲' : q.change < 0 ? '▼' : '';
+    const color = q.change > 0 ? 'var(--green)' : q.change < 0 ? 'var(--danger)' : 'var(--muted)';
+    return `<div class="intel-row">
+      <span class="intel-label">${label}</span>
+      <span class="intel-val">$${q.price.toFixed(2)}
+        ${arrow ? `<span style="color:${color};margin-left:6px">${arrow} ${Math.abs(q.pct).toFixed(2)}%
+                   <span style="opacity:.7">(${q.change > 0 ? '+' : ''}${q.change.toFixed(2)})</span></span>` : ''}
+      </span></div>`;
+  }
+
+  function _fmtDate(d) {
+    if (!d) return '—';
+    return new Date(d.substring(0, 10) + 'T12:00:00')
+      .toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function _fmtLarge(n) {
+    if (!n) return '—';
+    if (n >= 1e12) return '$' + (n / 1e12).toFixed(2) + 'T';
+    if (n >= 1e9)  return '$' + (n / 1e9).toFixed(2) + 'B';
+    if (n >= 1e6)  return '$' + (n / 1e6).toFixed(2) + 'M';
+    return '$' + n.toFixed(0);
+  }
+
+  function _recColor(rec) {
+    if (!rec) return 'var(--muted)';
+    const r = rec.toLowerCase();
+    if (r.includes('buy') || r.includes('overweight') || r.includes('outperform')) return 'var(--green)';
+    if (r.includes('sell') || r.includes('underweight') || r.includes('underperform')) return 'var(--danger)';
+    if (r.includes('hold') || r.includes('neutral') || r.includes('equal')) return 'var(--warn)';
+    return 'var(--muted)';
+  }
+
+  function _actionClass(action) {
+    const a = (action || '').toLowerCase();
+    if (a === 'up' || a === 'upgraded') return 'intel-up';
+    if (a === 'down' || a === 'downgraded') return 'intel-down';
+    return 'intel-neutral';
+  }
+
+  async function openIntelModal(ticker) {
+    document.getElementById('intel-modal-title').textContent = `📊 ${ticker} — Market Intel`;
+    document.getElementById('intel-loading').style.display = 'block';
+    document.getElementById('intel-content').classList.add('hidden');
+    document.getElementById('intel-modal').classList.remove('hidden');
+
+    try {
+      const res  = await fetch(`/api/extended/${encodeURIComponent(ticker)}`);
+      const data = await res.json();
+      let html = '';
+
+      // After-hours / pre-market
+      if (data.post_market || data.pre_market) {
+        html += `<div class="intel-section"><div class="intel-section-title">⏰ Extended Hours</div>`;
+        if (data.post_market) html += _intelQuoteRow('After-Hours', data.post_market);
+        if (data.pre_market)  html += _intelQuoteRow('Pre-Market',  data.pre_market);
+        html += `</div>`;
+      }
+
+      // Earnings
+      const e = data.earnings;
+      if (e && e.next_date) {
+        html += `<div class="intel-section"><div class="intel-section-title">📅 Earnings</div>
+          <div class="intel-row"><span class="intel-label">Next Date</span>
+            <span class="intel-val">${_fmtDate(e.next_date)}</span></div>
+          ${e.eps_estimate != null ? `<div class="intel-row"><span class="intel-label">EPS Estimate</span>
+            <span class="intel-val">$${e.eps_estimate.toFixed(2)}</span></div>` : ''}
+          ${e.revenue_estimate != null ? `<div class="intel-row"><span class="intel-label">Revenue Est.</span>
+            <span class="intel-val">${_fmtLarge(e.revenue_estimate)}</span></div>` : ''}
+        </div>`;
+      }
+
+      // Analyst consensus
+      const a = data.analyst;
+      if (a && (a.target_mean || a.rec)) {
+        const upside = a.current && a.target_mean
+          ? ((a.target_mean - a.current) / a.current * 100).toFixed(1) : null;
+        html += `<div class="intel-section">
+          <div class="intel-section-title">🎯 Analyst Consensus${a.n ? ` <span style="font-weight:400">(${a.n} analysts)</span>` : ''}</div>
+          ${a.rec ? `<div class="intel-row"><span class="intel-label">Recommendation</span>
+            <span class="intel-val" style="color:${_recColor(a.rec)}">${a.rec}</span></div>` : ''}
+          ${a.target_mean ? `<div class="intel-row"><span class="intel-label">Price Target</span>
+            <span class="intel-val">$${a.target_mean.toFixed(2)}
+              <span style="color:var(--muted);font-size:12px;font-weight:400">
+                (Low $${a.target_low?.toFixed(2) || '?'} · High $${a.target_high?.toFixed(2) || '?'})
+              </span></span></div>` : ''}
+          ${upside != null ? `<div class="intel-row"><span class="intel-label">Upside to Target</span>
+            <span class="intel-val" style="color:${parseFloat(upside) >= 0 ? 'var(--green)' : 'var(--danger)'}">
+              ${upside >= 0 ? '+' : ''}${upside}%</span></div>` : ''}
+        </div>`;
+      }
+
+      // Upgrades / downgrades
+      if (data.upgrades && data.upgrades.length > 0) {
+        html += `<div class="intel-section"><div class="intel-section-title">📈 Recent Analyst Actions</div>
+          ${data.upgrades.map(u => `
+            <div class="intel-row" style="align-items:flex-start">
+              <span class="intel-label">${_fmtDate(u.date)}</span>
+              <span class="intel-val" style="font-size:13px">
+                <span style="font-weight:700">${u.firm}</span>
+                ${u.from && u.to ? `<span style="color:var(--muted)"> · ${u.from} → ${u.to}</span>`
+                  : u.to ? `<span style="color:var(--muted)"> · ${u.to}</span>` : ''}
+                ${u.action ? `<span class="intel-action ${_actionClass(u.action)}">${u.action}</span>` : ''}
+              </span></div>`).join('')}
+        </div>`;
+      }
+
+      if (!html) html = `<div style="padding:32px 0;text-align:center;color:var(--muted);">No extended data available for this ticker.</div>`;
+      document.getElementById('intel-content').innerHTML = html;
+      document.getElementById('intel-loading').style.display = 'none';
+      document.getElementById('intel-content').classList.remove('hidden');
+    } catch(e) {
+      document.getElementById('intel-loading').textContent = 'Failed to load market data.';
+    }
+  }
+
+  function closeIntelModal() {
+    document.getElementById('intel-modal').classList.add('hidden');
+  }
 
   // ── On load: check if already running ────────────────────────────
   window.addEventListener('DOMContentLoaded', async () => {
