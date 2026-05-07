@@ -1453,7 +1453,7 @@
   function filterBrowse(q) {
     const term = q.trim().toUpperCase();
     const byText = term ? _browseCards.filter(c => c.ticker.includes(term)) : _browseCards;
-    renderBrowseCards(applyAhFilter(applyPctFilter(byText)));
+    renderBrowseCards(_ahFilterOnly ? applyAhFilter(byText) : applyAhFilter(applyPctFilter(byText)));
     if (_browsePrices) applyPricesToCards(_browsePrices);
     applyAfterHours();
   }
