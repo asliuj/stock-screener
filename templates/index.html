@@ -759,14 +759,14 @@
         <label>% Change:</label>
         <button class="filter-btn active-all" onclick="setPctFilter('all',this)">All</button>
         <button class="filter-btn" onclick="setPctFilter('gainers',this)">▲ Gainers</button>
-        <button class="filter-btn" onclick="setPctFilter('up1',this)">▲ &gt;1%</button>
-        <button class="filter-btn" onclick="setPctFilter('up2',this)">▲ &gt;2%</button>
         <button class="filter-btn" onclick="setPctFilter('up5',this)">▲ &gt;5%</button>
+        <button class="filter-btn" onclick="setPctFilter('up10',this)">▲ &gt;10%</button>
+        <button class="filter-btn" onclick="setPctFilter('up15',this)">▲ &gt;15%</button>
         <span class="filter-sep">|</span>
         <button class="filter-btn" onclick="setPctFilter('losers',this)">▼ Losers</button>
-        <button class="filter-btn" onclick="setPctFilter('down1',this)">▼ &gt;1%</button>
-        <button class="filter-btn" onclick="setPctFilter('down2',this)">▼ &gt;2%</button>
         <button class="filter-btn" onclick="setPctFilter('down5',this)">▼ &gt;5%</button>
+        <button class="filter-btn" onclick="setPctFilter('down10',this)">▼ &gt;10%</button>
+        <button class="filter-btn" onclick="setPctFilter('down15',this)">▼ &gt;15%</button>
         <span class="filter-sep">|</span>
         <div class="filter-custom">
           Min <input id="filter-pct-min" type="number" step="0.1" placeholder="e.g. -3">%
@@ -1230,13 +1230,13 @@
   const PCT_PRESETS = {
     all:     { min: null, max: null },
     gainers: { min: 0,    max: null },
-    up1:     { min: 1,    max: null },
-    up2:     { min: 2,    max: null },
     up5:     { min: 5,    max: null },
+    up10:    { min: 10,   max: null },
+    up15:    { min: 15,   max: null },
     losers:  { min: null, max: 0 },
-    down1:   { min: null, max: -1 },
-    down2:   { min: null, max: -2 },
     down5:   { min: null, max: -5 },
+    down10:  { min: null, max: -10 },
+    down15:  { min: null, max: -15 },
   };
 
   function _clearFilterBtns() {
@@ -1249,8 +1249,8 @@
     _clearFilterBtns();
     document.getElementById('filter-pct-min').value = '';
     document.getElementById('filter-pct-max').value = '';
-    const isUp = ['gainers','up1','up2','up5'].includes(preset);
-    btn.classList.add(isUp ? 'active-up' : ['losers','down1','down2','down5'].includes(preset) ? 'active-down' : 'active-all');
+    const isUp = ['gainers','up5','up10','up15'].includes(preset);
+    btn.classList.add(isUp ? 'active-up' : ['losers','down5','down10','down15'].includes(preset) ? 'active-down' : 'active-all');
     filterBrowse(document.getElementById('browse-search').value);
   }
 
@@ -1263,11 +1263,11 @@
   }
 
   function applyPctFilter(cards) {
+    if (!_browsePrices) return cards;  // prices not loaded yet — show all
     const { min, max } = _browseFilter;
-    if ((min === null && max === null) || !_browsePrices) return cards;
     return cards.filter(c => {
       const d = _browsePrices[c.ticker];
-      if (!d) return true;                       // no price yet — keep card
+      if (!d) return false;  // no price data — always hide
       if (min !== null && d.pct < min) return false;
       if (max !== null && d.pct > max) return false;
       return true;
