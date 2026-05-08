@@ -79,32 +79,6 @@ _holdings_meta = {
 }
 _holdings_lock = threading.Lock()
 
-# ── yfinance rate-limit circuit breaker ───────────────────────────────────────
-_rl = {"hits": 0, "until": 0.0}
-_RL_THRESHOLD = 3
-_RL_PAUSE     = 60   # seconds to bypass yfinance after threshold is reached
-
-def _rl_tripped() -> bool:
-    """True while we are inside the rate-limit pause window."""
-    return _rl["hits"] >= _RL_THRESHOLD and time.time() < _rl["until"]
-
-def _rl_hit():
-    """Record one rate-limit event; trip the breaker when threshold is reached."""
-    _rl["hits"] += 1
-    if _rl["hits"] >= _RL_THRESHOLD:
-        _rl["until"] = time.time() + _RL_PAUSE
-        log.warning(f"yfinance rate-limited {_rl['hits']} time(s) — bypassing for {_RL_PAUSE}s")
-
-def _rl_ok():
-    """Call after a successful yfinance response to reset the counter."""
-    if _rl["hits"]:
-        _rl["hits"] = 0
-        _rl["until"] = 0.0
-
-def _is_rate_err(e) -> bool:
-    s = str(e).lower()
-    return any(k in s for k in ("rate", "429", "too many"))
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 # Exchange suffixes: tickers ending with these (e.g. ASML.AS, 7203.T) keep their dot.
@@ -418,18 +392,15 @@ def _yf_download(tickers, max_retries: int = 3, **kwargs):
     kwargs = {"group_by": "ticker", "auto_adjust": True, "progress": False, "threads": True} | kwargs
     for attempt in range(max_retries):
         try:
-            result = yf.download(tickers=tickers, **kwargs)
-            _rl_ok()
-            return result
+            return yf.download(tickers=tickers, **kwargs)
         except Exception as e:
-            if _is_rate_err(e):
-                _rl_hit()
-                if attempt < max_retries - 1:
-                    wait = 10 * (2 ** attempt)   # 10s, 20s, 40s
-                    log.warning(f"Rate limited — retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
-                    time.sleep(wait)
-                    continue
-            raise
+            is_rate_limit = any(k in str(e).lower() for k in ("rate", "429", "too many"))
+            if is_rate_limit and attempt < max_retries - 1:
+                wait = 10 * (2 ** attempt)   # 10s, 20s, 40s
+                log.warning(f"Rate limited — retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+            else:
+                raise
 
 
 def _fetch_history_stooq(ticker: str, days: int = 90) -> pd.DataFrame | None:
@@ -469,73 +440,6 @@ def _fetch_pe_cnbc(ticker: str) -> float | None:
         return float(pe) if pe not in (None, "", "N/A") else None
     except Exception:
         return None
-
-
-def _fetch_yf_summary(ticker: str) -> dict:
-    """
-    Direct Yahoo Finance quoteSummary API — used when yfinance rate-limits tkr.info.
-    Returns a dict with the same field names as tkr.info where possible, plus
-    '_earnings' and '_upgrades' keys pre-parsed for api_extended to consume.
-    """
-    try:
-        resp = requests.get(
-            f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker}",
-            params={"modules": "price,financialData,calendarEvents,upgradeDowngradeHistory,summaryDetail"},
-            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-            timeout=12,
-        )
-        if resp.status_code != 200:
-            return {}
-        result = (resp.json().get("quoteSummary", {}).get("result") or [{}])[0]
-
-        def rv(d, k):
-            v = d.get(k)
-            return v.get("raw") if isinstance(v, dict) else v
-
-        p, fd, sd = result.get("price", {}), result.get("financialData", {}), result.get("summaryDetail", {})
-
-        info: dict = {
-            "regularMarketPrice":       rv(p,  "regularMarketPrice"),
-            "postMarketPrice":          rv(p,  "postMarketPrice"),
-            "preMarketPrice":           rv(p,  "preMarketPrice"),
-            "regularMarketVolume":      rv(p,  "regularMarketVolume"),
-            "averageVolume":            rv(sd, "averageVolume"),
-            "averageDailyVolume3Month": rv(sd, "averageVolume10days"),
-            "currentPrice":             rv(fd, "currentPrice"),
-            "recommendationKey":        fd.get("recommendationKey"),
-            "numberOfAnalystOpinions":  rv(fd, "numberOfAnalystOpinions"),
-            "targetMeanPrice":          rv(fd, "targetMeanPrice"),
-            "targetLowPrice":           rv(fd, "targetLowPrice"),
-            "targetHighPrice":          rv(fd, "targetHighPrice"),
-        }
-
-        # Earnings
-        earnings = result.get("calendarEvents", {}).get("earnings", {})
-        dates = earnings.get("earningsDate", [])
-        if dates:
-            ts = dates[0].get("raw") if isinstance(dates[0], dict) else dates[0]
-            info["_earnings"] = {
-                "next_date":        datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else None,
-                "eps_estimate":     rv(earnings, "earningsAverage"),
-                "revenue_estimate": rv(earnings, "revenueAverage"),
-            }
-
-        # Upgrades / downgrades
-        history = result.get("upgradeDowngradeHistory", {}).get("history", [])[:5]
-        if history:
-            info["_upgrades"] = [
-                {"date":   datetime.fromtimestamp(h.get("epochGradeDate", 0)).strftime("%Y-%m-%d"),
-                 "firm":   h.get("firm", ""),
-                 "to":     h.get("toGrade", ""),
-                 "from":   h.get("fromGrade", ""),
-                 "action": h.get("action", "")}
-                for h in history
-            ]
-
-        return {k: v for k, v in info.items() if v is not None}
-    except Exception as e:
-        log.debug(f"YF summary fallback failed for {ticker}: {e}")
-        return {}
 
 
 def screen_batch(tickers: list[str], pe_max: float, rsi_min: float, rsi_max: float, vol_ratio_min: float) -> list[dict]:
@@ -848,35 +752,20 @@ def api_extended(ticker):
     """After-hours/pre-market quote, earnings calendar, analyst consensus, and recent upgrades."""
     ticker = ticker.upper()
     out = {"post_market": None, "pre_market": None, "volume": None, "earnings": None, "analyst": None, "upgrades": []}
-
-    # Lazy fallback — calls quoteSummary API once; cached for all sections that need it
-    _summ: dict = {}
-    def _fb() -> dict:
-        if not _summ:
-            _summ.update(_fetch_yf_summary(ticker))
-        return _summ
-
     try:
-        tkr = yf.Ticker(ticker)
-        fi  = tkr.fast_info
+        tkr  = yf.Ticker(ticker)
+        fi   = tkr.fast_info
 
-        # Skip yfinance info entirely if circuit breaker is tripped
-        if _rl_tripped():
-            info = _fb()
-        else:
-            try:
-                info = tkr.info or {}
-                if info: _rl_ok()
-            except Exception as e:
-                if _is_rate_err(e): _rl_hit()
-                info = {}
-            if not info:
-                info = _fb()
+        # Fetch info once — used for both after-hours prices and analyst consensus
+        try:
+            info = tkr.info or {}
+        except Exception:
+            info = {}
 
         last = (_safe_val(getattr(fi, "last_price", None))
                 or _safe_val(info.get("regularMarketPrice")) or 0)
 
-        # After-hours / pre-market
+        # After-hours / pre-market: fast_info attrs first, then info dict fallback
         for key, fi_attr, info_key in (
             ("post_market", "post_market_price", "postMarketPrice"),
             ("pre_market",  "pre_market_price",  "preMarketPrice"),
@@ -895,28 +784,28 @@ def api_extended(ticker):
         vol     = info.get("regularMarketVolume") or info.get("volume")
         avg_vol = info.get("averageVolume") or info.get("averageDailyVolume3Month")
         if vol:
-            out["volume"] = {"today": int(vol), "avg": int(avg_vol) if avg_vol else None,
-                             "ratio": round(vol / avg_vol, 2) if avg_vol else None}
+            out["volume"] = {
+                "today":   int(vol),
+                "avg":     int(avg_vol) if avg_vol else None,
+                "ratio":   round(vol / avg_vol, 2) if avg_vol else None,
+            }
 
-        # Earnings calendar — skip yfinance if tripped, fall back on any failure
-        if not _rl_tripped():
-            try:
-                cal = tkr.calendar
-                if cal:
-                    d = cal if isinstance(cal, dict) else cal[cal.columns[0]].to_dict()
-                    dates = d.get("Earnings Date") or []
-                    if not isinstance(dates, (list, tuple)): dates = [dates]
-                    out["earnings"] = {
-                        "next_date":        str(dates[0])[:10] if dates else None,
-                        "eps_estimate":     _safe_val(d.get("Earnings Average") or d.get("EPS Estimate")),
-                        "revenue_estimate": _safe_val(d.get("Revenue Average") or d.get("Revenue Estimate")),
-                    }
-            except Exception as e:
-                if _is_rate_err(e): _rl_hit()
-        if not out["earnings"]:
-            out["earnings"] = _fb().get("_earnings")
+        # Earnings calendar
+        try:
+            cal = tkr.calendar
+            if cal:
+                d = cal if isinstance(cal, dict) else cal[cal.columns[0]].to_dict()
+                dates = d.get("Earnings Date") or []
+                if not isinstance(dates, (list, tuple)): dates = [dates]
+                out["earnings"] = {
+                    "next_date":        str(dates[0])[:10] if dates else None,
+                    "eps_estimate":     _safe_val(d.get("Earnings Average") or d.get("EPS Estimate")),
+                    "revenue_estimate": _safe_val(d.get("Revenue Average") or d.get("Revenue Estimate")),
+                }
+        except Exception:
+            pass
 
-        # Analyst consensus
+        # Analyst consensus — reuse info already fetched above
         if info:
             rec = (info.get("recommendationKey") or "").replace("_", " ").title() or None
             analyst = {
@@ -930,22 +819,21 @@ def api_extended(ticker):
             if any(analyst.values()):
                 out["analyst"] = analyst
 
-        # Upgrades / downgrades — skip yfinance if tripped, fall back on any failure
-        if not _rl_tripped():
-            try:
-                ud = tkr.upgrades_downgrades
-                if ud is not None and not ud.empty:
-                    ud = ud.sort_index(ascending=False).head(5)
-                    out["upgrades"] = [
-                        {"date":   str(idx.date()) if hasattr(idx, "date") else str(idx)[:10],
-                         "firm":   str(row.get("Firm", "")), "to": str(row.get("ToGrade", "")),
-                         "from":   str(row.get("FromGrade", "")), "action": str(row.get("Action", ""))}
-                        for idx, row in ud.iterrows()
-                    ]
-            except Exception as e:
-                if _is_rate_err(e): _rl_hit()
-        if not out["upgrades"]:
-            out["upgrades"] = _fb().get("_upgrades") or []
+        # Analyst upgrades / downgrades
+        try:
+            ud = tkr.upgrades_downgrades
+            if ud is not None and not ud.empty:
+                ud = ud.sort_index(ascending=False).head(5)
+                out["upgrades"] = [
+                    {"date":   str(idx.date()) if hasattr(idx, "date") else str(idx)[:10],
+                     "firm":   str(row.get("Firm", "")),
+                     "to":     str(row.get("ToGrade", "")),
+                     "from":   str(row.get("FromGrade", "")),
+                     "action": str(row.get("Action", ""))}
+                    for idx, row in ud.iterrows()
+                ]
+        except Exception:
+            pass
 
     except Exception as e:
         log.debug(f"Extended data failed for {ticker}: {e}")
