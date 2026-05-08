@@ -246,8 +246,17 @@ Shared parser for SSGA and iShares DataFrames. Extracts tickers, weights, and na
 ### stockanalysis.com weight supplementation
 `_fetch_stockanalysis(sym_lower)` returns `(tickers, weights)`. For SSGA, iShares, and Vanguard sources, if the primary source returns no weights, `_fetch_stockanalysis(sym_lower)[1]` is used as a fallback weight supplement (top ~25 free tier). QQQ (Wikipedia) and NATO always use stockanalysis.com for weights.
 
+### Page layout (three panels)
+The main page has three distinct control panels, each a `controls-panel` card:
+
+1. **ETF Holdings panel** — "Browse All Holdings" button (top-right of panel) + Select All checkbox + ETF group checkboxes. Defense group is forced onto its own flex row (line break injected before `defense` and `blackrock` groups in `initGroupCheckboxes`).
+2. **Research Stocks panel** — standalone panel containing only `#research-group-container`.
+3. **Stock Momentum panel** — unified panel containing: filter inputs (P/E Max, RSI Min, RSI Max, Volume Ratio Min) + Run Scan button, divider, status bar, stat cards (Universe / Screened / Passed Filters / Showing), divider, Top Results table. All in one `controls-panel` with `flex-direction:column`.
+
+Header contains only: logo (left), "View ETF Holdings" button (center), "Last run" timestamp (right).
+
 ### Browse All Holdings modal
-Opened via the "Browse All Holdings" button in the header. Shows all constituent stocks from selected ETFs with:
+Opened via the "Browse All Holdings" button inside the ETF Holdings panel. Shows all constituent stocks from selected ETFs with:
 - ETF badge(s) with fund weight % (e.g. "VGT 18.53%") — sorted by highest fund weight first
 - Current price + ▲/▼ daily change % (fetched async via `POST /api/prices`)
 - MA20 and MA50 (same async fetch, requires `period="3mo"` to have enough data)
@@ -266,9 +275,12 @@ Opened via the "Browse All Holdings" button in the header. Shows all constituent
 - `_setAhBtn(show, active)` — updates the "Show all / Show only movers" button state
 
 ### Research Stocks group
-Stocks added via "Browse All Holdings" are saved to `localStorage` under key `screener_research_stocks`. They appear as a "Research Stocks" group in the Portfolio panel with no checkboxes — all research stocks are **always included** in every scan, passed to `/api/run` as `research_stocks`, and tagged "Research" in the results ETF badge column. They bypass the ETF holdings lookup — added directly to the screening universe.
+Stocks are saved to `localStorage` under key `screener_research_stocks`. They appear in the standalone **Research Stocks panel** — all research stocks are **always included** in every scan, passed to `/api/run` as `research_stocks`, and tagged "Research" in the results ETF badge column. They bypass the ETF holdings lookup.
 - Each stock shows as a clickable blue ticker link (opens News+Price popup), a 📊 Intel button, and a ✕ remove button
-- No group or individual checkboxes — `startScan()` uses `getResearch()` directly
+- No checkboxes — `startScan()` uses `getResearch()` directly
+- **Seeded defaults** (added once on first load): `DIA`, `^DJI`, `^IXIC`
+- `RESEARCH_NAMES` map provides display names: `{ DIA: 'Dow Jones Industrial Average', '^DJI': '...Index', '^IXIC': 'NASDAQ Composite' }` — currently not shown in UI (ticker symbol shown instead), but available for future use
+- `getResearch()` caches result in `_researchCache` (module-level); `saveResearch()` updates cache + localStorage together
 
 ### News + Price popup (modal)
 Triggered by: clicking a ticker in Top Results, clicking a research stock ticker, or the 📰 News button on browse cards.
@@ -279,8 +291,9 @@ Triggered by: clicking a ticker in Top Results, clicking a research stock ticker
 - Handles both old and new yfinance news response formats
 
 ### Market Intel modal (`📊 Intel`)
-Triggered by: 📊 button in Top Results, Research Stocks, or browse cards. Fetches `GET /api/extended/<ticker>`.
-- **Extended Hours**: after-hours and pre-market price + ▲/▼ % change (fast_info attrs first, then `tkr.info` dict fallback for `postMarketPrice`/`preMarketPrice`)
+Triggered by: 📊 button in Top Results, Research Stocks, or browse cards. Fetches `GET /api/extended/<ticker>` and `POST /api/prices` **in parallel**.
+- **Price bar** at top: current price, ▲/▼ % change + dollar change, MA20, MA50 (same bar as News+Price popup, rendered via shared `_renderPriceBar(barEl, d)` helper)
+- **Extended Hours**: after-hours and pre-market price + ▲/▼ % change
 - **Volume**: today's volume, 3-month average, ratio vs average (color-coded ≥2× = warn)
 - **Earnings**: next date, EPS estimate, revenue estimate (from `tkr.calendar`)
 - **Analyst Consensus**: recommendation, price target (mean/low/high), upside % (from `tkr.info`)
@@ -298,10 +311,12 @@ Opened via "View ETF Holdings" button. Shows each ETF row with:
 
 ### Shared JS helpers
 ```js
-const _chg = ch => ({ arrow, color })   // ▲/▼ arrow + green/red color for a price change
-const _ir  = (label, val, vs='') => ... // renders one intel-row div (label + value)
-function _resetAh()                      // clears all AH state (_ahData, _ahFilterOnly, UI)
-function _setAhBtn(show, active)         // updates "Show all / Show only movers" button
+const _chg = ch => ({ arrow, color })        // ▲/▼ arrow + green/red color for a price change
+const _ir  = (label, val, vs='') => ...      // renders one intel-row div (label + value)
+const closeModal = id => ...                 // hides any modal by element ID
+function _renderPriceBar(barEl, d)           // renders price bar HTML into barEl (shared by News + Intel modals)
+function _resetAh()                          // clears all AH state (_ahData, _ahFilterOnly, UI)
+function _setAhBtn(show, active)             // updates "Show all / Show only movers" button
 ```
 
 ---

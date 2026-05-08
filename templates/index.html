@@ -30,6 +30,7 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
+      font-size: 14px;
     }
 
     /* ── Header ─────────────────────────────────────────────────────── */
@@ -51,7 +52,7 @@
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 9px 18px;
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 600;
       cursor: pointer;
       display: flex;
@@ -106,7 +107,7 @@
     #holdings-bar {
       background: var(--surface); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 12px 20px;
-      margin-bottom: 16px; display: flex; align-items: center; gap: 12px; font-size: 13px;
+      margin-bottom: 16px; display: flex; align-items: center; gap: 12px; font-size: 14px;
     }
 
     /* ── Status bar ─────────────────────────────────────────────────── */
@@ -136,8 +137,8 @@
       background: var(--surface); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 6px 16px;
     }
-    .stat-label { font-size: 21px; color: var(--muted); }
-    .stat-value { font-size: 21px; font-weight: 700; }
+    .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+    .stat-value { font-size: 22px; font-weight: 700; }
     .stat-value.green  { color: var(--green); }
     .stat-value.blue   { color: var(--blue); }
     .stat-value.purple { color: var(--purple); }
@@ -179,7 +180,7 @@
       background: var(--surface2);
       padding: 12px 16px;
       text-align: left;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       color: var(--muted);
       text-transform: uppercase;
@@ -265,7 +266,7 @@
       color: var(--muted);
     }
     #empty-state .empty-icon { font-size: 48px; margin-bottom: 16px; }
-    #empty-state h3 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
+    #empty-state h3 { font-size: 16px; margin-bottom: 8px; color: var(--text); }
     #empty-state p  { font-size: 14px; }
 
     /* ── Spinner ────────────────────────────────────────────────────── */
@@ -301,7 +302,7 @@
       border: 1px solid #1f6feb55;
       border-radius: 12px;
       padding: 2px 8px;
-      font-size: 11px;
+      font-size: 14px;
       font-weight: 700;
       color: var(--blue);
       white-space: nowrap;
@@ -328,7 +329,7 @@
       border: 1px solid var(--border);
       border-radius: var(--radius);
       color: var(--text);
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 600;
       padding: 8px 12px;
       width: 90px;
@@ -357,7 +358,7 @@
     .etf-group { display: flex; flex-direction: column; gap: 6px; }
     .etf-group-header { display: flex; align-items: center; gap: 6px; }
     .etf-group-all { accent-color: var(--blue); width: 13px; height: 13px; cursor: pointer; flex-shrink: 0; }
-    .etf-group-label { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; cursor: pointer; user-select: none; }
+    .etf-group-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; cursor: pointer; user-select: none; }
     .etf-group-checks { display: flex; gap: 8px; flex-wrap: wrap; }
 
     /* ── Holdings Modal ─────────────────────────────────────────────── */
@@ -577,7 +578,7 @@
     }
     .intel-row { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
     .intel-label { font-size: 13px; color: var(--muted); min-width: 130px; flex-shrink: 0; }
-    .intel-val { font-size: 14px; font-weight: 600; color: var(--text); flex: 1; }
+    .intel-val { font-size: 15px; font-weight: 600; color: var(--text); flex: 1; }
     .intel-action {
       display: inline-block; font-size: 10px; font-weight: 700;
       padding: 1px 6px; border-radius: 10px; margin-left: 6px; text-transform: uppercase;
@@ -833,6 +834,7 @@
       <button class="modal-close" onclick="closeIntelModal()">✕</button>
     </div>
     <div class="modal-body" id="intel-modal-body" style="padding:0 24px 8px">
+      <div id="intel-price-bar" class="news-price-bar hidden"></div>
       <div id="intel-loading" style="padding:24px 0;text-align:center;color:var(--muted);">Loading…</div>
       <div id="intel-content" class="hidden"></div>
     </div>
@@ -865,11 +867,24 @@
   // Shared change-color helper and intel row builder
   const _chg = ch => ({ arrow: ch > 0 ? '▲' : ch < 0 ? '▼' : '', color: ch > 0 ? 'var(--green)' : ch < 0 ? 'var(--danger)' : 'var(--muted)' });
   const _ir  = (label, val, vs = '') => `<div class="intel-row"><span class="intel-label">${label}</span><span class="intel-val"${vs ? ` style="${vs}"` : ''}>${val}</span></div>`;
+  const closeModal = id => document.getElementById(id).classList.add('hidden');
+  function _renderPriceBar(barEl, d) {
+    const { arrow, color } = _chg(d.change);
+    barEl.innerHTML =
+      `<span style="font-size:22px;font-weight:700;color:var(--text)">$${d.price.toFixed(2)}</span>` +
+      (arrow ? `<span style="color:${color};font-weight:700;font-size:15px">${arrow} ${Math.abs(d.pct).toFixed(2)}%</span>
+                <span style="color:${color};font-size:13px">(${d.change > 0 ? '+' : ''}${d.change.toFixed(2)})</span>` : '') +
+      (d.ma20 ? `<span style="font-size:12px;color:var(--muted)">MA20 $${d.ma20.toFixed(2)}</span>` : '') +
+      (d.ma50 ? `<span style="font-size:12px;color:var(--muted)">MA50 $${d.ma50.toFixed(2)}</span>` : '');
+    barEl.classList.remove('hidden');
+  }
 
   // ── Research Stocks ───────────────────────────────────────────────
-  const RESEARCH_KEY = 'screener_research_stocks';
-  const getResearch  = () => { try { return JSON.parse(localStorage.getItem(RESEARCH_KEY) || '[]'); } catch { return []; } };
-  const saveResearch = s  => localStorage.setItem(RESEARCH_KEY, JSON.stringify(s));
+  const RESEARCH_KEY   = 'screener_research_stocks';
+  const RESEARCH_NAMES = { 'DIA': 'Dow Jones Industrial Average', '^DJI': 'Dow Jones Industrial Average (Index)', '^IXIC': 'NASDAQ Composite' };
+  let   _researchCache = null;
+  const getResearch  = () => _researchCache ??= (() => { try { return JSON.parse(localStorage.getItem(RESEARCH_KEY) || '[]'); } catch { return []; } })();
+  const saveResearch = s  => { _researchCache = s; localStorage.setItem(RESEARCH_KEY, JSON.stringify(s)); };
   const isResearch   = t  => getResearch().includes(t);
 
   function toggleResearch(ticker, btn) {
@@ -1161,9 +1176,7 @@
     document.getElementById('holdings-modal').classList.remove('hidden');
   }
 
-  function closeHoldingsModal() {
-    document.getElementById('holdings-modal').classList.add('hidden');
-  }
+  function closeHoldingsModal() { closeModal('holdings-modal'); }
 
   // Close modals on backdrop click
   [['holdings-modal', closeHoldingsModal], ['browse-modal', closeBrowseModal], ['news-modal', closeNewsModal], ['intel-modal', closeIntelModal]]
@@ -1228,6 +1241,7 @@
   function initGroupCheckboxes() {
     // Generate ETF group checkboxes from data
     document.getElementById('etf-groups-container').innerHTML = ETF_GROUPS.map(g => `
+      ${g.id === 'defense' || g.id === 'blackrock' ? '<div style="flex-basis:100%;height:0"></div>' : ''}
       <div class="etf-group">
         <div class="etf-group-header">
           <input type="checkbox" class="etf-group-all" id="grp-${g.id}" checked>
@@ -1514,17 +1528,7 @@
 
       // Price bar
       const d = prices[ticker];
-      if (d) {
-        const { arrow, color } = _chg(d.change);
-        const bar = document.getElementById('news-price-bar');
-        bar.innerHTML =
-          `<span style="font-size:22px;font-weight:700;color:var(--text)">$${d.price.toFixed(2)}</span>` +
-          (arrow ? `<span style="color:${color};font-weight:700;font-size:15px">${arrow} ${Math.abs(d.pct).toFixed(2)}%</span>
-                    <span style="color:${color};font-size:13px">(${d.change > 0 ? '+' : ''}${d.change.toFixed(2)})</span>` : '') +
-          (d.ma20 ? `<span style="font-size:12px;color:var(--muted)">MA20 $${d.ma20.toFixed(2)}</span>` : '') +
-          (d.ma50 ? `<span style="font-size:12px;color:var(--muted)">MA50 $${d.ma50.toFixed(2)}</span>` : '');
-        bar.classList.remove('hidden');
-      }
+      if (d) _renderPriceBar(document.getElementById('news-price-bar'), d);
 
       // External links
       const dot = `<span style="color:var(--muted)">·</span>`;
@@ -1557,9 +1561,7 @@
     }
   }
 
-  function closeNewsModal() {
-    document.getElementById('news-modal').classList.add('hidden');
-  }
+  function closeNewsModal() { closeModal('news-modal'); }
 
 
   // ── Market Intel modal ────────────────────────────────────────────
@@ -1605,12 +1607,21 @@
     document.getElementById('intel-modal-title').textContent = `📊 ${ticker} — Market Intel`;
     document.getElementById('intel-loading').style.display = 'block';
     document.getElementById('intel-content').classList.add('hidden');
+    document.getElementById('intel-price-bar').classList.add('hidden');
     document.getElementById('intel-modal').classList.remove('hidden');
 
     try {
-      const res  = await fetch(`/api/extended/${encodeURIComponent(ticker)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const [extRes, priceRes] = await Promise.all([
+        fetch(`/api/extended/${encodeURIComponent(ticker)}`),
+        fetch('/api/prices', { method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ tickers: [ticker] }) }),
+      ]);
+      if (!extRes.ok) throw new Error(`HTTP ${extRes.status}`);
+      const [data, prices] = await Promise.all([extRes.json(), priceRes.json()]);
+
+      // Price bar
+      const p = prices[ticker];
+      if (p) _renderPriceBar(document.getElementById('intel-price-bar'), p);
       let html = '';
 
       // After-hours / pre-market
@@ -1680,12 +1691,14 @@
     }
   }
 
-  function closeIntelModal() {
-    document.getElementById('intel-modal').classList.add('hidden');
-  }
+  function closeIntelModal() { closeModal('intel-modal'); }
 
   // ── On load: check if already running ────────────────────────────
   window.addEventListener('DOMContentLoaded', async () => {
+    // Seed default research stocks
+    const _seeds = ['^IXIC', '^DJI', 'DIA'].filter(t => !isResearch(t));
+    if (_seeds.length) { _researchCache = null; saveResearch([..._seeds, ...getResearch()]); }
+
     initGroupCheckboxes();
     renderResearchGroup();
     // Disable Run Scan until holdings confirmed ready
