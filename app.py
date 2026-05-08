@@ -33,10 +33,10 @@ app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 PORT             = 8080
-PE_MAX           = 30.0
+PE_MAX           = 25.0
 VOLUME_RATIO_MIN = 2.0
-RSI_MIN          = 50.0
-RSI_MAX          = 70.0
+RSI_MIN          = 1.0
+RSI_MAX          = 30.0
 RSI_PERIOD       = 14
 VOL_WINDOW       = 20
 BATCH_SIZE       = 25
@@ -169,7 +169,7 @@ def _fetch_stockanalysis(sym_lower: str) -> tuple[list[str], dict[str, float]]:
             f"https://stockanalysis.com/etf/{sym_lower}/holdings/__data.json",
             headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
         if resp.status_code == 200:
-            raw   = json.dumps(resp.json())
+            raw   = resp.text
             pairs = re.findall(r'"\$([A-Z]{1,5}(?:-[A-Z])?)",\s*"(\d+\.\d+)%"', raw)
             if pairs:
                 tickers = list(dict.fromkeys(_normalize_ticker(t) for t, _ in pairs))
@@ -312,7 +312,8 @@ def load_holdings_cache() -> bool:
     try:
         if not os.path.exists(HOLDINGS_CACHE_FILE):
             return False
-        data    = json.load(open(HOLDINGS_CACHE_FILE))
+        with open(HOLDINGS_CACHE_FILE) as f:
+            data = json.load(f)
         updated = data.get("updated")
         loaded  = data.get("holdings", {})
         if not updated or not loaded:
@@ -338,7 +339,8 @@ def save_holdings_cache():
         with _holdings_lock:
             data = {"updated": _holdings_meta["updated"],
                     "holdings": dict(_holdings), "weights": dict(_weights), "names": dict(_names)}
-        json.dump(data, open(HOLDINGS_CACHE_FILE, "w"), indent=2)
+        with open(HOLDINGS_CACHE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
         log.info(f"Holdings cache saved → {HOLDINGS_CACHE_FILE}")
     except Exception as e:
         log.error(f"Could not save holdings cache: {e}")
@@ -855,8 +857,10 @@ def api_afterhours():
     for i in range(0, len(tickers), BATCH_SIZE):
         batch = tickers[i:i + BATCH_SIZE]
         try:
-            ext = _yf_download(batch, period="1d", interval="5m", prepost=True)
-            reg = _yf_download(batch, period="5d", interval="1d")
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                fut_ext = pool.submit(_yf_download, batch, period="1d", interval="5m", prepost=True)
+                fut_reg = pool.submit(_yf_download, batch, period="5d", interval="1d")
+                ext, reg = fut_ext.result(), fut_reg.result()
             for t in batch:
                 try:
                     if t not in lvl0(ext) or t not in lvl0(reg): continue

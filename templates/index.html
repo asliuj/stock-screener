@@ -666,15 +666,15 @@
       <span class="panel-label" style="flex:0 0 100%;margin-bottom:-8px;">Stock Momentum</span>
       <div class="control-group">
         <label class="control-label" for="inp-pe">P/E Max</label>
-        <input type="number" id="inp-pe" class="ctrl-input" value="30" min="1" max="500" step="1">
+        <input type="number" id="inp-pe" class="ctrl-input" value="25" min="1" max="500" step="1">
       </div>
       <div class="control-group">
         <label class="control-label" for="inp-rsi">RSI Min</label>
-        <input type="number" id="inp-rsi" class="ctrl-input" value="50" min="1" max="99" step="1">
+        <input type="number" id="inp-rsi" class="ctrl-input" value="1" min="1" max="99" step="1">
       </div>
       <div class="control-group">
         <label class="control-label" for="inp-rsi-max">RSI Max</label>
-        <input type="number" id="inp-rsi-max" class="ctrl-input" value="70" min="2" max="100" step="1">
+        <input type="number" id="inp-rsi-max" class="ctrl-input" value="30" min="2" max="100" step="1">
       </div>
       <div class="control-group">
         <label class="control-label" for="inp-vol">Volume Ratio Min</label>
@@ -767,7 +767,7 @@
     </div>
     <div class="modal-body">
       <div class="browse-search-wrap">
-        <input id="browse-search" type="text" placeholder="Search ticker…" oninput="filterBrowse(this.value)">
+        <input id="browse-search" type="text" placeholder="Search ticker…" oninput="_filterBrowseDebounced(this.value)">
         <span id="browse-count-label"></span>
       </div>
       <div class="ah-toggle-row">
@@ -847,9 +847,13 @@
 
 <script>
   // ── State ─────────────────────────────────────────────────────────
-  let pollTimer   = null;
-  let _intelTicker = null;
-  let isRunning = false;
+  let pollTimer      = null;
+  let _intelTicker   = null;
+  let isRunning      = false;
+  let _holdingsCache = null;   // cached /api/holdings/data payload — refreshed on fresh_fetch
+
+  const _debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+  const _filterBrowseDebounced = _debounce(q => filterBrowse(q), 180);
 
   // ── Helpers ───────────────────────────────────────────────────────
   function fmtNum(n, dec = 2) { return n != null ? Number(n).toFixed(dec) : '—'; }
@@ -1210,7 +1214,7 @@
         if (data.status === 'ready' || data.status === 'error') {
           clearInterval(holdingsPollTimer);
           holdingsPollTimer = null;
-          if (data.fresh_fetch) openHoldingsReport();
+          if (data.fresh_fetch) { _holdingsCache = null; openHoldingsReport(); }
         }
       } catch(e) { console.error('Holdings poll error:', e); }
     }, 2000);
@@ -1331,8 +1335,11 @@
     if (selected.size === 0) { alert('Select at least one ETF first.'); return; }
 
     try {
-      const res      = await fetch('/api/holdings/data');
-      const holdings = await res.json();
+      if (!_holdingsCache) {
+        const res = await fetch('/api/holdings/data');
+        _holdingsCache = await res.json();
+      }
+      const holdings = _holdingsCache;
       const tickers  = holdings.tickers || {};
 
       const allWeights = holdings.weights || {};
