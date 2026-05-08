@@ -102,53 +102,42 @@
     #run-btn:active:not(:disabled) { transform: scale(.97); }
     #run-btn:disabled { opacity: .55; cursor: not-allowed; }
 
-    /* ── Status Bar ─────────────────────────────────────────────────── */
-    #status-bar {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 16px 20px;
-      margin-bottom: 24px;
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      min-height: 60px;
+    /* ── Holdings bar ───────────────────────────────────────────────── */
+    #holdings-bar {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 12px 20px;
+      margin-bottom: 16px; display: flex; align-items: center; gap: 12px; font-size: 13px;
     }
+
+    /* ── Status bar ─────────────────────────────────────────────────── */
+    #status-bar { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
     #status-icon { font-size: 22px; }
     .status-info { flex: 1; }
     #status-msg  { font-size: 14px; color: var(--text); }
     #status-sub  { font-size: 12px; color: var(--muted); margin-top: 3px; }
 
     /* ── Progress bar ───────────────────────────────────────────────── */
-    .progress-wrap {
-      flex: 1; height: 6px;
-      background: var(--surface2);
-      border-radius: 3px;
-      overflow: hidden;
-    }
+    .progress-wrap { flex: 1; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
     #progress-fill {
-      height: 100%;
+      height: 100%; width: 0%;
       background: linear-gradient(90deg, var(--blue), var(--purple));
-      border-radius: 3px;
-      transition: width .4s ease;
-      width: 0%;
+      border-radius: 3px; transition: width .4s ease;
     }
 
-    /* ── Stats Row ──────────────────────────────────────────────────── */
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 16px;
-      margin-bottom: 28px;
-    }
+    /* ── Panel utilities ─────────────────────────────────────────────── */
+    .panel-label   { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .panel-divider { border-top: 1px solid var(--border); margin: 16px -24px; }
+    .panel-row     { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-end; margin-bottom: 16px; }
+
+    /* ── Stats row ───────────────────────────────────────────────────── */
+    .stats-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
     .stat-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 18px 20px;
+      flex: 1; display: flex; align-items: center; gap: 8px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 6px 16px;
     }
-    .stat-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-    .stat-value { font-size: 28px; font-weight: 700; }
+    .stat-label { font-size: 21px; color: var(--muted); }
+    .stat-value { font-size: 21px; font-weight: 700; }
     .stat-value.green  { color: var(--green); }
     .stat-value.blue   { color: var(--blue); }
     .stat-value.purple { color: var(--purple); }
@@ -637,13 +626,6 @@
   </div>
   <div class="header-right">
     <span id="last-run">Not yet run</span>
-    <button id="browse-btn" class="header-btn" onclick="openBrowseModal()">
-      🗂 Browse All Holdings
-    </button>
-    <button id="run-btn" onclick="startScan()">
-      <span id="btn-icon">▶</span>
-      <span id="btn-label">Run Scan</span>
-    </button>
   </div>
 </header>
 
@@ -651,106 +633,93 @@
 <main>
 
   <!-- Holdings status bar -->
-  <div id="holdings-bar" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 20px;margin-bottom:16px;display:flex;align-items:center;gap:12px;font-size:13px;">
+  <div id="holdings-bar">
     <span id="holdings-icon">⏳</span>
     <span id="holdings-msg" style="flex:1;color:var(--muted);">Checking ETF holdings cache…</span>
     <span id="holdings-updated" style="color:var(--muted);font-size:12px;"></span>
   </div>
 
-  <!-- Controls panel -->
-  <div class="controls-panel">
-    <div class="control-group">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-        <div class="control-label" style="margin-bottom:0">Portfolio</div>
+  <!-- ETF Holdings panel -->
+  <div class="controls-panel" style="flex-direction:column;align-items:stretch;gap:8px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <span class="panel-label">ETF Holdings</span>
+      <div style="display:flex;align-items:center;gap:12px;">
         <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:pointer;user-select:none;">
           <input type="checkbox" id="cb-select-all" checked onchange="toggleAllEtfs(this.checked)">
           Select All
         </label>
+        <button id="browse-btn" class="header-btn" onclick="openBrowseModal()">🗂 Browse All Holdings</button>
       </div>
-      <div class="etf-groups" id="etf-groups-container"></div>
-      <div id="research-group-container"></div>
     </div>
-    <div class="control-group">
-      <label class="control-label" for="inp-pe">P/E Max</label>
-      <input type="number" id="inp-pe" class="ctrl-input" value="30" min="1" max="500" step="1">
-    </div>
-    <div class="control-group">
-      <label class="control-label" for="inp-rsi">RSI Min</label>
-      <input type="number" id="inp-rsi" class="ctrl-input" value="50" min="1" max="99" step="1">
-    </div>
-    <div class="control-group">
-      <label class="control-label" for="inp-rsi-max">RSI Max</label>
-      <input type="number" id="inp-rsi-max" class="ctrl-input" value="70" min="2" max="100" step="1">
-    </div>
-    <div class="control-group">
-      <label class="control-label" for="inp-vol">Volume Ratio Min</label>
-      <input type="number" id="inp-vol" class="ctrl-input" value="2.0" min="1" max="10" step="0.1">
-    </div>
+    <div class="etf-groups" id="etf-groups-container"></div>
   </div>
 
-  <!-- Status bar -->
-  <div id="status-bar">
-    <span id="status-icon">💤</span>
-    <div class="status-info">
-      <div id="status-msg">Ready — click "Run Scan" to screen selected ETF holdings</div>
-      <div id="status-sub"></div>
-    </div>
-    <div class="progress-wrap" id="progress-wrap" style="display:none">
-      <div id="progress-fill"></div>
-    </div>
+  <!-- Research Stocks panel -->
+  <div class="controls-panel">
+    <div id="research-group-container" style="width:100%"></div>
   </div>
 
-  <!-- Stats row -->
-  <div class="stats-row">
-    <div class="stat-card">
-      <div class="stat-label">Universe</div>
-      <div class="stat-value blue" id="stat-universe">—</div>
+  <!-- Stock Momentum panel -->
+  <div class="controls-panel" style="flex-direction:column;align-items:stretch;gap:0;margin-bottom:28px;">
+    <div class="panel-row">
+      <span class="panel-label" style="flex:0 0 100%;margin-bottom:-8px;">Stock Momentum</span>
+      <div class="control-group">
+        <label class="control-label" for="inp-pe">P/E Max</label>
+        <input type="number" id="inp-pe" class="ctrl-input" value="30" min="1" max="500" step="1">
+      </div>
+      <div class="control-group">
+        <label class="control-label" for="inp-rsi">RSI Min</label>
+        <input type="number" id="inp-rsi" class="ctrl-input" value="50" min="1" max="99" step="1">
+      </div>
+      <div class="control-group">
+        <label class="control-label" for="inp-rsi-max">RSI Max</label>
+        <input type="number" id="inp-rsi-max" class="ctrl-input" value="70" min="2" max="100" step="1">
+      </div>
+      <div class="control-group">
+        <label class="control-label" for="inp-vol">Volume Ratio Min</label>
+        <input type="number" id="inp-vol" class="ctrl-input" value="2.0" min="1" max="10" step="0.1">
+      </div>
+      <button id="run-btn" onclick="startScan()" style="margin-left:auto;height:38px;">
+        <span id="btn-icon">▶</span> <span id="btn-label">Run Scan</span>
+      </button>
     </div>
-    <div class="stat-card">
-      <div class="stat-label">Screened</div>
-      <div class="stat-value purple" id="stat-screened">—</div>
+    <div class="panel-divider"></div>
+    <div id="status-bar">
+      <span id="status-icon">💤</span>
+      <div class="status-info">
+        <div id="status-msg">Ready — click "Run Scan" to screen selected ETF holdings</div>
+        <div id="status-sub"></div>
+      </div>
+      <div class="progress-wrap" id="progress-wrap" style="display:none"><div id="progress-fill"></div></div>
     </div>
-    <div class="stat-card">
-      <div class="stat-label">Passed Filters</div>
-      <div class="stat-value warn" id="stat-passed">—</div>
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-label">Universe</div><div class="stat-value blue" id="stat-universe">—</div></div>
+      <div class="stat-card"><div class="stat-label">Screened</div><div class="stat-value purple" id="stat-screened">—</div></div>
+      <div class="stat-card"><div class="stat-label">Passed Filters</div><div class="stat-value warn" id="stat-passed">—</div></div>
+      <div class="stat-card"><div class="stat-label">Showing</div><div class="stat-value green" id="stat-showing">—</div></div>
     </div>
-    <div class="stat-card">
-      <div class="stat-label">Showing</div>
-      <div class="stat-value green" id="stat-showing">—</div>
+    <div class="panel-divider"></div>
+    <div class="table-wrap" style="background:transparent;border:none;border-radius:0;box-shadow:none;">
+      <div class="table-header" style="padding-left:0;padding-right:0;">
+        <span class="table-title"><span id="live-dot" style="display:none" class="pulse"></span> Top Results</span>
+        <span class="table-count" id="result-count">0 stocks</span>
+      </div>
+      <div id="empty-state">
+        <div class="empty-icon">🔍</div>
+        <h3>No results yet</h3>
+        <p>Click <strong>Run Scan</strong> to screen selected ETF holdings against all filters.</p>
+      </div>
+      <table id="results-table" style="display:none">
+        <thead>
+          <tr>
+            <th style="width:50px">#</th><th>Ticker</th><th>ETF</th>
+            <th class="right">Price</th><th class="right">P/E Ratio</th>
+            <th>Volume Ratio</th><th>RSI</th><th class="right">Volume</th>
+          </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+      </table>
     </div>
-  </div>
-
-  <!-- Results table -->
-  <div class="table-wrap">
-    <div class="table-header">
-      <span class="table-title">
-        <span id="live-dot" style="display:none" class="pulse"></span>
-        Top Results
-      </span>
-      <span class="table-count" id="result-count">0 stocks</span>
-    </div>
-
-    <div id="empty-state">
-      <div class="empty-icon">🔍</div>
-      <h3>No results yet</h3>
-      <p>Click <strong>Run Scan</strong> to screen selected ETF holdings against all filters.</p>
-    </div>
-
-    <table id="results-table" style="display:none">
-      <thead>
-        <tr>
-          <th style="width:50px">#</th>
-          <th>Ticker</th>
-          <th>ETF</th>
-          <th class="right">Price</th>
-          <th class="right">P/E Ratio</th>
-          <th>Volume Ratio</th>
-          <th>RSI</th>
-          <th class="right">Volume</th>
-        </tr>
-      </thead>
-      <tbody id="results-body"></tbody>
-    </table>
   </div>
 
 </main>
