@@ -79,6 +79,32 @@ _holdings_meta = {
 }
 _holdings_lock = threading.Lock()
 
+# ── yfinance rate-limit circuit breaker ───────────────────────────────────────
+_rl = {"hits": 0, "until": 0.0}
+_RL_THRESHOLD = 3
+_RL_PAUSE     = 60   # seconds to bypass yfinance after threshold is reached
+
+def _rl_tripped() -> bool:
+    """True while we are inside the rate-limit pause window."""
+    return _rl["hits"] >= _RL_THRESHOLD and time.time() < _rl["until"]
+
+def _rl_hit():
+    """Record one rate-limit event; trip the breaker when threshold is reached."""
+    _rl["hits"] += 1
+    if _rl["hits"] >= _RL_THRESHOLD:
+        _rl["until"] = time.time() + _RL_PAUSE
+        log.warning(f"yfinance rate-limited {_rl['hits']} time(s) — bypassing for {_RL_PAUSE}s")
+
+def _rl_ok():
+    """Call after a successful yfinance response to reset the counter."""
+    if _rl["hits"]:
+        _rl["hits"] = 0
+        _rl["until"] = 0.0
+
+def _is_rate_err(e) -> bool:
+    s = str(e).lower()
+    return any(k in s for k in ("rate", "429", "too many"))
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 # Exchange suffixes: tickers ending with these (e.g. ASML.AS, 7203.T) keep their dot.
@@ -392,15 +418,18 @@ def _yf_download(tickers, max_retries: int = 3, **kwargs):
     kwargs = {"group_by": "ticker", "auto_adjust": True, "progress": False, "threads": True} | kwargs
     for attempt in range(max_retries):
         try:
-            return yf.download(tickers=tickers, **kwargs)
+            result = yf.download(tickers=tickers, **kwargs)
+            _rl_ok()
+            return result
         except Exception as e:
-            is_rate_limit = any(k in str(e).lower() for k in ("rate", "429", "too many"))
-            if is_rate_limit and attempt < max_retries - 1:
-                wait = 10 * (2 ** attempt)   # 10s, 20s, 40s
-                log.warning(f"Rate limited — retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(wait)
-            else:
-                raise
+            if _is_rate_err(e):
+                _rl_hit()
+                if attempt < max_retries - 1:
+                    wait = 10 * (2 ** attempt)   # 10s, 20s, 40s
+                    log.warning(f"Rate limited — retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait)
+                    continue
+            raise
 
 
 def _fetch_history_stooq(ticker: str, days: int = 90) -> pd.DataFrame | None:
@@ -831,12 +860,18 @@ def api_extended(ticker):
         tkr = yf.Ticker(ticker)
         fi  = tkr.fast_info
 
-        try:
-            info = tkr.info or {}
-        except Exception:
-            info = {}
-        if not info:
+        # Skip yfinance info entirely if circuit breaker is tripped
+        if _rl_tripped():
             info = _fb()
+        else:
+            try:
+                info = tkr.info or {}
+                if info: _rl_ok()
+            except Exception as e:
+                if _is_rate_err(e): _rl_hit()
+                info = {}
+            if not info:
+                info = _fb()
 
         last = (_safe_val(getattr(fi, "last_price", None))
                 or _safe_val(info.get("regularMarketPrice")) or 0)
@@ -863,20 +898,21 @@ def api_extended(ticker):
             out["volume"] = {"today": int(vol), "avg": int(avg_vol) if avg_vol else None,
                              "ratio": round(vol / avg_vol, 2) if avg_vol else None}
 
-        # Earnings calendar — fall back to quoteSummary if yfinance is rate-limited
-        try:
-            cal = tkr.calendar
-            if cal:
-                d = cal if isinstance(cal, dict) else cal[cal.columns[0]].to_dict()
-                dates = d.get("Earnings Date") or []
-                if not isinstance(dates, (list, tuple)): dates = [dates]
-                out["earnings"] = {
-                    "next_date":        str(dates[0])[:10] if dates else None,
-                    "eps_estimate":     _safe_val(d.get("Earnings Average") or d.get("EPS Estimate")),
-                    "revenue_estimate": _safe_val(d.get("Revenue Average") or d.get("Revenue Estimate")),
-                }
-        except Exception:
-            pass
+        # Earnings calendar — skip yfinance if tripped, fall back on any failure
+        if not _rl_tripped():
+            try:
+                cal = tkr.calendar
+                if cal:
+                    d = cal if isinstance(cal, dict) else cal[cal.columns[0]].to_dict()
+                    dates = d.get("Earnings Date") or []
+                    if not isinstance(dates, (list, tuple)): dates = [dates]
+                    out["earnings"] = {
+                        "next_date":        str(dates[0])[:10] if dates else None,
+                        "eps_estimate":     _safe_val(d.get("Earnings Average") or d.get("EPS Estimate")),
+                        "revenue_estimate": _safe_val(d.get("Revenue Average") or d.get("Revenue Estimate")),
+                    }
+            except Exception as e:
+                if _is_rate_err(e): _rl_hit()
         if not out["earnings"]:
             out["earnings"] = _fb().get("_earnings")
 
@@ -894,19 +930,20 @@ def api_extended(ticker):
             if any(analyst.values()):
                 out["analyst"] = analyst
 
-        # Upgrades / downgrades — fall back to quoteSummary if yfinance is rate-limited
-        try:
-            ud = tkr.upgrades_downgrades
-            if ud is not None and not ud.empty:
-                ud = ud.sort_index(ascending=False).head(5)
-                out["upgrades"] = [
-                    {"date":   str(idx.date()) if hasattr(idx, "date") else str(idx)[:10],
-                     "firm":   str(row.get("Firm", "")), "to": str(row.get("ToGrade", "")),
-                     "from":   str(row.get("FromGrade", "")), "action": str(row.get("Action", ""))}
-                    for idx, row in ud.iterrows()
-                ]
-        except Exception:
-            pass
+        # Upgrades / downgrades — skip yfinance if tripped, fall back on any failure
+        if not _rl_tripped():
+            try:
+                ud = tkr.upgrades_downgrades
+                if ud is not None and not ud.empty:
+                    ud = ud.sort_index(ascending=False).head(5)
+                    out["upgrades"] = [
+                        {"date":   str(idx.date()) if hasattr(idx, "date") else str(idx)[:10],
+                         "firm":   str(row.get("Firm", "")), "to": str(row.get("ToGrade", "")),
+                         "from":   str(row.get("FromGrade", "")), "action": str(row.get("Action", ""))}
+                        for idx, row in ud.iterrows()
+                    ]
+            except Exception as e:
+                if _is_rate_err(e): _rl_hit()
         if not out["upgrades"]:
             out["upgrades"] = _fb().get("_upgrades") or []
 
