@@ -8,21 +8,21 @@
     /* ── Reset & Base ───────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg:        #0d1117;
-      --surface:   #161b22;
-      --surface2:  #1c2128;
-      --border:    #30363d;
-      --accent:    #238636;
-      --accent-h:  #2ea043;
-      --blue:      #1f6feb;
-      --text:      #e6edf3;
-      --muted:     #8b949e;
-      --danger:    #da3633;
-      --warn:      #d29922;
-      --green:     #3fb950;
-      --purple:    #a371f7;
-      --radius:    8px;
-      --shadow:    0 4px 24px rgba(0,0,0,.5);
+      --bg:        #f0f3f7;
+      --surface:   #ffffff;
+      --surface2:  #f5f7fb;
+      --border:    #d0d7e2;
+      --accent:    #1a5fb4;
+      --accent-h:  #154d94;
+      --blue:      #1a5fb4;
+      --text:      #1a2535;
+      --muted:     #6b7b90;
+      --danger:    #c41a1a;
+      --warn:      #b06800;
+      --green:     #1a8a2e;
+      --purple:    #6040b0;
+      --radius:    6px;
+      --shadow:    0 2px 8px rgba(0,0,0,.10);
     }
     html, body { height: 100%; }
     body {
@@ -35,8 +35,8 @@
 
     /* ── Header ─────────────────────────────────────────────────────── */
     header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
+      background: #0d1b2a;
+      border-bottom: 2px solid #1a5fb4;
       padding: 16px 32px;
       display: grid;
       grid-template-columns: 1fr auto 1fr;
@@ -47,9 +47,9 @@
     }
     .header-center { display: flex; justify-content: center; }
     .header-btn {
-      background: var(--surface2);
-      color: var(--text);
-      border: 1px solid var(--border);
+      background: rgba(255,255,255,.08);
+      color: #ffffff;
+      border: 1px solid rgba(255,255,255,.22);
       border-radius: var(--radius);
       padding: 9px 18px;
       font-size: 14px;
@@ -60,7 +60,7 @@
       gap: 7px;
       transition: border-color .15s, background .15s;
     }
-    .header-btn:hover { border-color: var(--blue); background: var(--surface); }
+    .header-btn:hover { border-color: rgba(255,255,255,.55); background: rgba(255,255,255,.14); }
     .logo {
       display: flex;
       align-items: center;
@@ -68,6 +68,7 @@
       font-size: 20px;
       font-weight: 700;
       letter-spacing: -0.3px;
+      color: #ffffff;
     }
     .logo-icon { font-size: 24px; }
     .header-right {
@@ -78,7 +79,7 @@
     }
     #last-run {
       font-size: 12px;
-      color: var(--muted);
+      color: rgba(255,255,255,.55);
     }
 
     /* ── Main ───────────────────────────────────────────────────────── */
@@ -211,9 +212,9 @@
       font-weight: 700;
       color: var(--muted);
     }
-    tr:nth-child(1) .rank { background: #ffd70022; border-color: #ffd700; color: #ffd700; }
-    tr:nth-child(2) .rank { background: #c0c0c022; border-color: #c0c0c0; color: #c0c0c0; }
-    tr:nth-child(3) .rank { background: #cd7f3222; border-color: #cd7f32; color: #cd7f32; }
+    tr:nth-child(1) .rank { background: #fdf3cc; border-color: #c9a800; color: #8a7000; }
+    tr:nth-child(2) .rank { background: #f0f0f0; border-color: #909090; color: #505050; }
+    tr:nth-child(3) .rank { background: #f5e8dd; border-color: #a06020; color: #7a4510; }
 
     /* Ticker */
     .ticker-cell { display: flex; align-items: center; gap: 10px; }
@@ -247,13 +248,13 @@
     /* PE chip */
     .pe-chip {
       display: inline-block;
-      background: #2386361a;
-      border: 1px solid #23863640;
+      background: #d6f0da;
+      border: 1px solid #90cc98;
       border-radius: 20px;
       padding: 3px 10px;
       font-size: 13px;
       font-weight: 600;
-      color: var(--green);
+      color: #116622;
     }
 
     /* Price */
@@ -298,8 +299,8 @@
     /* ── ETF badges in results table ───────────────────────────────── */
     .etf-badge {
       display: inline-block;
-      background: #1f6feb22;
-      border: 1px solid #1f6feb55;
+      background: #ddeaff;
+      border: 1px solid #aac4f0;
       border-radius: 12px;
       padding: 2px 8px;
       font-size: 14px;
@@ -483,8 +484,8 @@
       transition: all .12s;
     }
     .filter-btn:hover { border-color: var(--blue); color: var(--text); }
-    .filter-btn.active-up   { background: #2386361a; border-color: var(--green);  color: var(--green);  }
-    .filter-btn.active-down { background: #da36331a; border-color: var(--danger); color: var(--danger); }
+    .filter-btn.active-up   { background: #d6f0da; border-color: var(--green);  color: var(--green);  }
+    .filter-btn.active-down { background: #fde0e0; border-color: var(--danger); color: var(--danger); }
     .filter-btn.active-all  { background: var(--surface2); border-color: var(--blue); color: var(--blue); }
     .filter-sep { color: var(--border); font-size: 13px; }
     .filter-custom { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
@@ -512,8 +513,8 @@
       font-size: 10px; font-weight: 700; padding: 1px 5px;
       border-radius: 10px; margin-left: 5px; vertical-align: middle;
     }
-    .ah-up   { background: #2386361a; border: 1px solid #23863640; color: var(--green); }
-    .ah-down { background: #da36331a; border: 1px solid #da363640; color: var(--danger); }
+    .ah-up   { background: #d6f0da; border: 1px solid #90cc98; color: var(--green); }
+    .ah-down { background: #fde0e0; border: 1px solid #f0a0a0; color: var(--danger); }
     .ah-toggle-row {
       display: flex; align-items: center; gap: 8px;
       margin-bottom: 10px; font-size: 12px; color: var(--muted);
@@ -583,8 +584,8 @@
       display: inline-block; font-size: 10px; font-weight: 700;
       padding: 1px 6px; border-radius: 10px; margin-left: 6px; text-transform: uppercase;
     }
-    .intel-up      { background: #2386361a; border: 1px solid #23863640; color: var(--green); }
-    .intel-down    { background: #da36331a; border: 1px solid #da363340; color: var(--danger); }
+    .intel-up      { background: #d6f0da; border: 1px solid #90cc98; color: var(--green); }
+    .intel-down    { background: #fde0e0; border: 1px solid #f0a0a0; color: var(--danger); }
     .intel-neutral { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); }
     .research-intel-btn {
       background: none; border: none; color: var(--muted);
@@ -830,7 +831,10 @@
 <div id="intel-modal" class="modal-overlay hidden">
   <div class="modal" style="max-width:620px">
     <div class="modal-header">
-      <span class="modal-title" id="intel-modal-title">📊 Market Intelligence</span>
+      <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
+        <span class="modal-title" id="intel-modal-title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📊 Market Intelligence</span>
+        <button id="intel-add-btn" class="browse-card-btn" onclick="toggleResearch(_intelTicker,this)" style="margin-top:0;white-space:nowrap;flex-shrink:0;display:none"></button>
+      </div>
       <button class="modal-close" onclick="closeIntelModal()">✕</button>
     </div>
     <div class="modal-body" id="intel-modal-body" style="padding:0 24px 8px">
@@ -854,6 +858,7 @@
 
   const _debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
   const _filterBrowseDebounced = _debounce(q => filterBrowse(q), 180);
+  const _bq = () => document.getElementById('browse-search').value;
 
   // ── Helpers ───────────────────────────────────────────────────────
   function fmtNum(n, dec = 2) { return n != null ? Number(n).toFixed(dec) : '—'; }
@@ -1053,6 +1058,7 @@
           <div class="ticker-cell">
             <span class="ticker-sym" style="cursor:pointer" onclick="openNewsModal('${r.ticker}')">${r.ticker}</span>
             <button onclick="openIntelModal('${r.ticker}')" title="Market Intel" style="background:none;border:none;cursor:pointer;font-size:13px;padding:0 3px;color:var(--muted);vertical-align:middle">📊</button>
+            <button id="add-btn-${r.ticker}" class="browse-card-btn ${isResearch(r.ticker)?'added':''}" onclick="toggleResearch('${r.ticker}',this)" style="white-space:nowrap;margin-top:0;vertical-align:middle">${isResearch(r.ticker)?'✓ Added':'+ Portfolio'}</button>
           </div>
         </td>
         <td>${etfBadges}</td>
@@ -1096,8 +1102,8 @@
   const ETF_GROUPS = [
     { id: 'overview',  label: 'Stock Market Overview', etfs: ['dia','oef','spy','qqq'] },
     { id: 'spdr',      label: 'State Street — SPDR',   etfs: ['xlv','xlk','xlf','xle','xli','xly','xlp','xlu','xlre','xlb','xlc'] },
-    { id: 'defense',   label: 'Defense',               etfs: ['xar','nato'] },
-    { id: 'blackrock', label: 'Blackrock — iShares',   etfs: ['ihak','iyh','iye','iyf','iyr','igv','ivv','iwf','iwm','ita','efa'] },
+    { id: 'defense',   label: 'Defense',               etfs: ['xar','nato','ita','ppa','shld','war','idef','gcad'] },
+    { id: 'blackrock', label: 'Blackrock — iShares',   etfs: ['ihak','iyh','iye','iyf','iyr','igv','ivv','iwf','iwm','efa'] },
     { id: 'vanguard',  label: 'Vanguard',              etfs: ['vgt','vfh','vht','vde','vis','vcr','vdc','vpu','vnq','vaw','vox'] },
   ];
   const GROUP_ORDER = ETF_GROUPS.flatMap(g => g.etfs);
@@ -1119,8 +1125,14 @@
     xlb:  'Materials Select Sector SPDR Fund',
     xlc:  'Communication Services Select Sector SPDR Fund',
     xar:  'SPDR S&P Aerospace & Defense ETF',
-    ihak: 'iShares Cybersecurity and Tech ETF',
     nato: 'Tema NATO & Defense ETF',
+    ita:  'iShares U.S. Aerospace & Defense ETF',
+    ppa:  'Invesco Aerospace & Defense ETF',
+    shld: 'Global X Defense Tech ETF',
+    war:  'VanEck Defense ETF',
+    idef: 'iShares MSCI Global Defense Industry ETF',
+    gcad: 'Global X Defence ETF',
+    ihak: 'iShares Cybersecurity and Tech ETF',
     igv:  'iShares Expanded Tech-Software Sector ETF',
     iyh:  'iShares U.S. Healthcare ETF',
     iye:  'iShares U.S. Energy ETF',
@@ -1129,7 +1141,6 @@
     ivv:  'iShares Core S&P 500 ETF',
     iwf:  'iShares Russell 1000 Growth ETF',
     iwm:  'iShares Russell 2000 ETF',
-    ita:  'iShares U.S. Aerospace & Defense ETF',
     efa:  'iShares MSCI EAFE ETF',
     vgt:  'Vanguard Information Technology ETF',
     vfh:  'Vanguard Financials ETF',
@@ -1305,7 +1316,7 @@
     document.getElementById('filter-pct-max').value = '';
     const isUp = ['gainers','up5','up10','up15'].includes(preset);
     btn.classList.add(isUp ? 'active-up' : ['losers','down5','down10','down15'].includes(preset) ? 'active-down' : 'active-all');
-    filterBrowse(document.getElementById('browse-search').value);
+    filterBrowse(_bq());
   }
 
   function applyCustomPctFilter() {
@@ -1313,7 +1324,7 @@
     const max = document.getElementById('filter-pct-max').value;
     _browseFilter = { min: min !== '' ? parseFloat(min) : null, max: max !== '' ? parseFloat(max) : null };
     _clearFilterBtns();
-    filterBrowse(document.getElementById('browse-search').value);
+    filterBrowse(_bq());
   }
 
   function applyPctFilter(cards) {
@@ -1379,7 +1390,7 @@
         .then(r => r.json())
         .then(prices => {
           _browsePrices = prices;
-          filterBrowse(document.getElementById('browse-search').value);
+          filterBrowse(_bq());
         })
         .catch(() => {});
     } catch(e) {
@@ -1464,7 +1475,7 @@
   }
 
   async function toggleAfterHours(enabled) {
-    if (!enabled) { _resetAh(); filterBrowse(document.getElementById('browse-search').value); return; }
+    if (!enabled) { _resetAh(); filterBrowse(_bq()); return; }
     const q = document.getElementById('browse-search').value;
     document.getElementById('ah-status').textContent = 'Fetching…';
     try {
@@ -1489,7 +1500,7 @@
   function toggleAhFilter() {
     _ahFilterOnly = !_ahFilterOnly;
     _setAhBtn(true, _ahFilterOnly);
-    filterBrowse(document.getElementById('browse-search').value);
+    filterBrowse(_bq());
   }
 
   function applyAhFilter(cards) {
@@ -1619,6 +1630,11 @@
     document.getElementById('intel-content').classList.add('hidden');
     document.getElementById('intel-price-bar').classList.add('hidden');
     document.getElementById('intel-modal').classList.remove('hidden');
+    const addBtn = document.getElementById('intel-add-btn');
+    const added  = isResearch(ticker);
+    addBtn.textContent = added ? '✓ Added' : '+ Portfolio';
+    addBtn.className   = `browse-card-btn${added ? ' added' : ''}`;
+    addBtn.style.display = '';
 
     try {
       const [extRes, priceRes] = await Promise.all([

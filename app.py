@@ -49,13 +49,14 @@ ALL_ETFS = [
     # State Street — SPDR
     "xlv", "xlk", "xlf", "xle", "xar", "xli", "xly", "xlp", "xlu", "xlre", "xlb", "xlc",
     # Defense
-    "nato",
+    "nato", "ita", "ppa", "shld", "war", "idef", "gcad",
     # Blackrock — iShares
-    "ihak", "igv", "iyh", "iye", "iyf", "iyr", "ivv", "iwf", "iwm", "ita", "efa",
+    "ihak", "igv", "iyh", "iye", "iyf", "iyr", "ivv", "iwf", "iwm", "efa",
     # Vanguard
     "vgt", "vfh", "vht", "vde", "vis", "vcr", "vdc", "vpu", "vnq", "vaw", "vox",
 ]
 HOLDINGS_CACHE_FILE = os.path.join(os.path.dirname(__file__), "holdings_cache.json")
+_ALL_ETFS_SET = frozenset(ALL_ETFS)   # O(1) membership test
 
 # ── State ─────────────────────────────────────────────────────────────────────
 _state = {
@@ -310,8 +311,6 @@ def fetch_etf_holdings(symbol: str) -> tuple[list[str], dict[str, float], dict[s
 def load_holdings_cache() -> bool:
     """Load holdings from disk. Returns True if cache exists and is current month."""
     try:
-        if not os.path.exists(HOLDINGS_CACHE_FILE):
-            return False
         with open(HOLDINGS_CACHE_FILE) as f:
             data = json.load(f)
         updated = data.get("updated")
@@ -449,9 +448,8 @@ def screen_batch(tickers: list[str], pe_max: float, rsi_min: float, rsi_max: flo
     # Try yfinance batch download; fall back to per-ticker Stooq on rate limit
     try:
         data = _yf_download(tickers, period="3mo", interval="1d")
-        ticker_data: dict[str, pd.DataFrame] = {
-            t: data[t].copy() for t in tickers if t in data.columns.get_level_values(0)
-        }
+        lvl0 = set(data.columns.get_level_values(0))
+        ticker_data: dict[str, pd.DataFrame] = {t: data[t] for t in tickers if t in lvl0}
     except Exception as e:
         log.warning(f"yfinance batch failed ({e}); falling back to Stooq per-ticker")
         ticker_data = {t: df for t in tickers if (df := _fetch_history_stooq(t)) is not None}
@@ -736,7 +734,7 @@ def api_news(ticker):
                 articles.append({"title": title, "url": url, "publisher": publisher, "published": pub_date})
     except Exception as e:
         log.debug(f"News fetch failed for {ticker}: {e}")
-    is_etf = ticker.lower() in ALL_ETFS
+    is_etf = ticker.lower() in _ALL_ETFS_SET
     sym    = ticker.lower().replace(".", "-")
     mw_path = "fund" if is_etf else "stock"
     links = {

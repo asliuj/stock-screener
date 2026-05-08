@@ -2,9 +2,9 @@
 
 ## Overview
 A real-time ETF-based stock screener that screens constituent stocks across 39 ETFs/indices (Stock Market Overview, State Street SPDR, Defense, Blackrock iShares, and Vanguard) for:
-- **P/E Ratio** < threshold (default 30)
+- **P/E Ratio** < threshold (default 25)
 - **Volume Spike** > threshold vs 20-day average (default 2×)
-- **RSI** in range (default 50–70)
+- **RSI** in range (default 1–30)
 
 Results are ranked by RSI (highest first). Each result is tagged with the ETF(s) it belongs to.
 
@@ -58,13 +58,19 @@ These appear at the **top** of the ETF Holdings Report modal as the "Stock Marke
 | XLB | Materials Select Sector SPDR Fund |
 | XLC | Communication Services Select Sector SPDR Fund |
 
-### Defense (2 ETFs)
+### Defense (8 ETFs)
 | Ticker | Name |
 |--------|------|
 | XAR | SPDR S&P Aerospace & Defense ETF |
 | NATO | Tema NATO & Defense ETF |
+| ITA | iShares U.S. Aerospace & Defense ETF |
+| PPA | Invesco Aerospace & Defense ETF |
+| SHLD | Global X Defense Tech ETF |
+| WAR | VanEck Defense ETF |
+| IDEF | iShares MSCI Global Defense Industry ETF |
+| GCAD | Global X Defence ETF |
 
-### Blackrock — iShares (11 ETFs)
+### Blackrock — iShares (10 ETFs)
 | Ticker | Name |
 |--------|------|
 | IHAK | iShares Cybersecurity and Tech ETF |
@@ -76,7 +82,6 @@ These appear at the **top** of the ETF Holdings Report modal as the "Stock Marke
 | IVV | iShares Core S&P 500 ETF |
 | IWF | iShares Russell 1000 Growth ETF |
 | IWM | iShares Russell 2000 ETF |
-| ITA | iShares U.S. Aerospace & Defense ETF |
 | EFA | iShares MSCI EAFE ETF |
 
 ### Vanguard (11 ETFs)
@@ -163,10 +168,11 @@ Each ETF is fetched using the first source that returns valid data. Always go th
 | ETF | Source | Holdings |
 |-----|--------|----------|
 | DIA, SPY, XLV, XLK, XLF, XLE, XLI, XLY, XLP, XLU, XLRE, XLB, XLC, XAR | SSGA XLSX | 23–500+ |
-| OEF, IHAK, IYH, IYE, IYF, IYR, IGV, IVV, IWF, IWM, ITA, EFA | iShares CSV | 43–1930 |
+| OEF, IHAK, IYH, IYE, IYF, IYR, IGV, IVV, IWF, IWM, EFA | iShares CSV | 43–1930 |
+| ITA | iShares CSV | 43–1930 (moved to Defense group) |
 | VGT, VFH, VHT, VDE, VIS, VCR, VDC, VPU, VNQ, VAW, VOX | Vanguard JSON | 67–415 |
 | QQQ | Wikipedia (Nasdaq-100) | ~102 |
-| NATO | stockanalysis.com | ~16–25 (free tier cap) |
+| NATO, PPA, SHLD, WAR, IDEF, GCAD | stockanalysis.com | ~16–25 (free tier cap) |
 
 ---
 
@@ -190,10 +196,10 @@ International tickers require special handling for Yahoo Finance:
 ## Screening Criteria (all configurable in the UI)
 | Filter | Default | Condition |
 |--------|---------|-----------|
-| P/E Ratio | 30 | Market cap / TTM net income |
+| P/E Ratio | 25 | Market cap / TTM net income |
 | Volume Ratio | 2× | Latest volume / 20-day average volume |
-| RSI Min | 50 | 14-period RSI |
-| RSI Max | 70 | 14-period RSI |
+| RSI Min | 1 | 14-period RSI |
+| RSI Max | 30 | 14-period RSI |
 
 Screening is two-pass:
 1. **Pass 1** — RSI + volume filter using a batch `yf.download()` (**25 tickers per batch**, **2s delay** between batches)
@@ -209,6 +215,35 @@ Screening is two-pass:
 
 **On quiet market days (low overall volume):**
 The 2× volume ratio default is calibrated for genuine volume spikes. On low-activity days the screener legitimately returns 0 results — this is not a bug. Users should lower the Volume Ratio slider to 1.2–1.5× if they want results on quiet days.
+
+---
+
+## Color Theme (Barchart-inspired, applied 2026-05-08)
+Light theme with dark navy header, matching Barchart's brand aesthetic.
+
+| CSS Variable | Value | Usage |
+|---|---|---|
+| `--bg` | `#f0f3f7` | Page background (light blue-gray) |
+| `--surface` | `#ffffff` | Cards, panels, modals |
+| `--surface2` | `#f5f7fb` | Alternating rows, inputs |
+| `--border` | `#d0d7e2` | All borders |
+| `--accent` / `--blue` | `#1a5fb4` | Barchart blue — buttons, links, accents |
+| `--text` | `#1a2535` | Dark navy body text |
+| `--muted` | `#6b7b90` | Secondary/dim text |
+| `--green` | `#1a8a2e` | Positive price changes |
+| `--danger` | `#c41a1a` | Negative price changes |
+| `--warn` | `#b06800` | Volume ratio warnings |
+| `--purple` | `#6040b0` | RSI meter gradient end |
+
+Header (`<header>`): hardcoded `#0d1b2a` background + `2px solid #1a5fb4` bottom border (not CSS vars — intentionally fixed so theme changes don't break it).
+
+Solid color replacements for semi-transparent backgrounds (work on white surfaces):
+- ETF badge: `#ddeaff` / `#aac4f0`
+- PE chip: `#d6f0da` / `#90cc98`
+- AH up badge: `#d6f0da` / `#90cc98`
+- AH down badge: `#fde0e0` / `#f0a0a0`
+- Intel up/down actions: same as AH badges
+- Rank medals: solid tints of gold/silver/bronze
 
 ---
 
@@ -292,7 +327,8 @@ Triggered by: clicking a ticker in Top Results, clicking a research stock ticker
 
 ### Market Intel modal (`📊 Intel`)
 Triggered by: 📊 button in Top Results, Research Stocks, or browse cards. Fetches `GET /api/extended/<ticker>` and `POST /api/prices` **in parallel**.
-- **Modal title**: `📊 TICKER · Company Name` — company name comes from `data.name` (`info["longName"]` or `info["shortName"]`); falls back to `📊 TICKER — Market Intel` if name unavailable. Title is set initially on open, then updated after data loads.
+- **Modal header**: title (`📊 TICKER · Company Name`) + **+ Portfolio button** (`#intel-add-btn`) side by side. Button shows `✓ Added` if ticker is already in Research Stocks; toggles via `toggleResearch(_intelTicker, this)`. Visible as soon as modal opens (state set synchronously before fetch).
+- **Modal title**: `📊 TICKER · Company Name` — company name from `data.name` (`info["longName"]` or `info["shortName"]`); falls back to `📊 TICKER — Market Intel`. Set initially on open, updated after data loads.
 - **Price bar** at top: current price, ▲/▼ % change + dollar change, MA20, MA50 (same bar as News+Price popup, rendered via shared `_renderPriceBar(barEl, d)` helper)
 - **Extended Hours**: after-hours and pre-market price + ▲/▼ % change
 - **Volume**: today's volume, 3-month average, ratio vs average (color-coded ≥2× = warn)
@@ -303,13 +339,20 @@ Triggered by: 📊 button in Top Results, Research Stocks, or browse cards. Fetc
 - `api_extended` response includes `name` field: `info.get("longName") or info.get("shortName") or ""`
 
 ### Top Results table
-Each ticker in the results table is a **clickable blue link** — clicking opens the News+Price popup. A 📊 button next to each ticker opens the Market Intel modal. Styled with `.ticker-sym:hover { text-decoration: underline }`.
+Each ticker in the results table has three inline controls in the ticker cell: clickable ticker link (opens News+Price popup), 📊 Intel button (opens Market Intel modal), and **+ Portfolio button** (adds to Research Stocks; toggles to ✓ Added). No separate column — all three sit in the same `ticker-cell` div. Styled with `.ticker-sym:hover { text-decoration: underline }`.
 
 ### ETF Holdings Report modal
 Opened via "View ETF Holdings" button. Shows each ETF row with:
 - ETF ticker (links to `finance.yahoo.com/quote/<TICKER>` — opens in new tab)
 - Full name, YTD %, daily %, current price, holdings count
 - All constituent tickers as Yahoo Finance hyperlinks (hover turns blue)
+
+### Performance optimisations (applied 2026-05-08)
+- **File handles**: `load_holdings_cache` and `save_holdings_cache` use `with open(...)` — no unclosed handles
+- **`api_afterhours` parallel downloads**: two `_yf_download` calls per batch (5m extended + 1d regular) now run concurrently via `ThreadPoolExecutor(max_workers=2)`
+- **`_fetch_stockanalysis` regex**: runs on `resp.text` directly — no intermediate `json.dumps(resp.json())`
+- **Browse search debounced**: `oninput` calls `_filterBrowseDebounced` (180ms) instead of `filterBrowse` directly — avoids thrashing `innerHTML` on every keystroke
+- **`/api/holdings/data` cached**: `_holdingsCache` module-level variable; populated on first browse modal open, cleared on `fresh_fetch` so re-fetched holdings are picked up
 
 ### Shared JS helpers
 ```js
