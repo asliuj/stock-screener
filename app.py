@@ -819,22 +819,29 @@ def api_extended(ticker):
     """After-hours/pre-market quote, earnings calendar, analyst consensus, and recent upgrades."""
     ticker = ticker.upper()
     out = {"post_market": None, "pre_market": None, "volume": None, "earnings": None, "analyst": None, "upgrades": []}
-    try:
-        tkr  = yf.Ticker(ticker)
-        fi   = tkr.fast_info
 
-        # Fetch info — fall back to direct quoteSummary API if yfinance rate-limits
+    # Lazy fallback — calls quoteSummary API once; cached for all sections that need it
+    _summ: dict = {}
+    def _fb() -> dict:
+        if not _summ:
+            _summ.update(_fetch_yf_summary(ticker))
+        return _summ
+
+    try:
+        tkr = yf.Ticker(ticker)
+        fi  = tkr.fast_info
+
         try:
             info = tkr.info or {}
         except Exception:
             info = {}
         if not info:
-            info = _fetch_yf_summary(ticker)
+            info = _fb()
 
         last = (_safe_val(getattr(fi, "last_price", None))
                 or _safe_val(info.get("regularMarketPrice")) or 0)
 
-        # After-hours / pre-market: fast_info attrs first, then info dict fallback
+        # After-hours / pre-market
         for key, fi_attr, info_key in (
             ("post_market", "post_market_price", "postMarketPrice"),
             ("pre_market",  "pre_market_price",  "preMarketPrice"),
@@ -853,13 +860,10 @@ def api_extended(ticker):
         vol     = info.get("regularMarketVolume") or info.get("volume")
         avg_vol = info.get("averageVolume") or info.get("averageDailyVolume3Month")
         if vol:
-            out["volume"] = {
-                "today":   int(vol),
-                "avg":     int(avg_vol) if avg_vol else None,
-                "ratio":   round(vol / avg_vol, 2) if avg_vol else None,
-            }
+            out["volume"] = {"today": int(vol), "avg": int(avg_vol) if avg_vol else None,
+                             "ratio": round(vol / avg_vol, 2) if avg_vol else None}
 
-        # Earnings calendar
+        # Earnings calendar — fall back to quoteSummary if yfinance is rate-limited
         try:
             cal = tkr.calendar
             if cal:
@@ -873,10 +877,10 @@ def api_extended(ticker):
                 }
         except Exception:
             pass
-        if not out["earnings"] and info.get("_earnings"):
-            out["earnings"] = info["_earnings"]
+        if not out["earnings"]:
+            out["earnings"] = _fb().get("_earnings")
 
-        # Analyst consensus — reuse info already fetched above
+        # Analyst consensus
         if info:
             rec = (info.get("recommendationKey") or "").replace("_", " ").title() or None
             analyst = {
@@ -890,23 +894,21 @@ def api_extended(ticker):
             if any(analyst.values()):
                 out["analyst"] = analyst
 
-        # Analyst upgrades / downgrades
+        # Upgrades / downgrades — fall back to quoteSummary if yfinance is rate-limited
         try:
             ud = tkr.upgrades_downgrades
             if ud is not None and not ud.empty:
                 ud = ud.sort_index(ascending=False).head(5)
                 out["upgrades"] = [
                     {"date":   str(idx.date()) if hasattr(idx, "date") else str(idx)[:10],
-                     "firm":   str(row.get("Firm", "")),
-                     "to":     str(row.get("ToGrade", "")),
-                     "from":   str(row.get("FromGrade", "")),
-                     "action": str(row.get("Action", ""))}
+                     "firm":   str(row.get("Firm", "")), "to": str(row.get("ToGrade", "")),
+                     "from":   str(row.get("FromGrade", "")), "action": str(row.get("Action", ""))}
                     for idx, row in ud.iterrows()
                 ]
         except Exception:
             pass
-        if not out["upgrades"] and info.get("_upgrades"):
-            out["upgrades"] = info["_upgrades"]
+        if not out["upgrades"]:
+            out["upgrades"] = _fb().get("_upgrades") or []
 
     except Exception as e:
         log.debug(f"Extended data failed for {ticker}: {e}")
