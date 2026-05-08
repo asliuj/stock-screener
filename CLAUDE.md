@@ -221,6 +221,19 @@ The 2× volume ratio default is calibrated for genuine volume spikes. On low-act
 - Each result row shows ETF badge(s) built from a reverse ticker→ETF map constructed at scan time
 - `screen_batch()` stores per-ticker DataFrames in `ticker_data: dict[str, DataFrame]`; lookups use `ticker_data.get(ticker)` directly — no `_get_df` closure needed
 
+### API endpoints
+| Route | Purpose |
+|-------|---------|
+| `GET /api/holdings` | Lightweight status poll (`{status, updated, message, counts, fresh_fetch}`) — safe every 2s |
+| `GET /api/holdings/data` | Full payload (`{tickers, weights, names}`) — call once on demand |
+| `POST /api/prices` | Price + MA20/MA50 for a ticker list; uses `period="3mo"` for MA50 data |
+| `GET /api/etf-performance` | YTD%, daily%, price for all ETFs; 5-min TTL cache |
+| `GET /api/news/<ticker>` | yfinance news articles + 5 external link URLs |
+| `GET /api/extended/<ticker>` | After-hours/pre-market quote, earnings, analyst consensus, upgrades/downgrades |
+| `POST /api/afterhours` | Batch extended-hours price vs regular close; returns tickers with any AH movement (≥0.01%); skips bars inside 9:30am–4pm ET window |
+| `POST /api/run` | Start screener; returns 409 if holdings not ready or already running |
+| `GET /api/status` | Screener poll |
+
 ### Holdings API split
 `GET /api/holdings` returns lightweight status only (`{status, updated, message, counts, fresh_fetch}`) — safe to poll every 2s.
 `GET /api/holdings/data` returns full payload (`{tickers, weights, names}`) — call once on demand, not on a poll loop.
@@ -241,12 +254,20 @@ Opened via the "Browse All Holdings" button in the header. Shows all constituent
 - Company name
 - **% change filter row**: preset buttons (All, Gainers, >5%/>10%/>15%, Losers, >5%/>10%/>15%) plus custom Min/Max inputs
 - **Stocks with no price data are hidden** once prices finish loading
+- **⏰ After-hours alerts checkbox**: fetches `POST /api/afterhours` for all visible tickers; overlays a green/red pill badge (e.g. `▲ 7.3% AH`) on cards with ≥5% extended-hours movement; auto-filters grid to movers-only on enable; "Show all" button toggles back
 - **📰 News button** on each card opens the News modal
+- **📊 Intel button** on each card opens the Market Intel modal
 - **+ Portfolio button** adds the stock to the Research Stocks group (localStorage-backed)
+
+**After-hours filter logic**: When `_ahFilterOnly` is true, `applyPctFilter` is bypassed entirely — AH movers are shown regardless of whether regular-hours price data loaded. When `_ahFilterOnly` is false, the normal `applyPctFilter → applyAhFilter` pipeline runs.
+
+**AH state helpers** (JS):
+- `_resetAh()` — clears `_ahData`, `_ahFilterOnly`, status label, and filter button in one call
+- `_setAhBtn(show, active)` — updates the "Show all / Show only movers" button state
 
 ### Research Stocks group
 Stocks added via "Browse All Holdings" are saved to `localStorage` under key `screener_research_stocks`. They appear as a "Research Stocks" group in the Portfolio panel with no checkboxes — all research stocks are **always included** in every scan, passed to `/api/run` as `research_stocks`, and tagged "Research" in the results ETF badge column. They bypass the ETF holdings lookup — added directly to the screening universe.
-- Each stock shows as a clickable blue ticker link (opens News+Price popup) and a ✕ remove button
+- Each stock shows as a clickable blue ticker link (opens News+Price popup), a 📊 Intel button, and a ✕ remove button
 - No group or individual checkboxes — `startScan()` uses `getResearch()` directly
 
 ### News + Price popup (modal)
@@ -257,14 +278,31 @@ Triggered by: clicking a ticker in Top Results, clicking a research stock ticker
 - Footer: 5 external links — Yahoo Finance, Stock Analysis, Seeking Alpha, MarketWatch, CNBC
 - Handles both old and new yfinance news response formats
 
+### Market Intel modal (`📊 Intel`)
+Triggered by: 📊 button in Top Results, Research Stocks, or browse cards. Fetches `GET /api/extended/<ticker>`.
+- **Extended Hours**: after-hours and pre-market price + ▲/▼ % change (fast_info attrs first, then `tkr.info` dict fallback for `postMarketPrice`/`preMarketPrice`)
+- **Volume**: today's volume, 3-month average, ratio vs average (color-coded ≥2× = warn)
+- **Earnings**: next date, EPS estimate, revenue estimate (from `tkr.calendar`)
+- **Analyst Consensus**: recommendation, price target (mean/low/high), upside % (from `tkr.info`)
+- **Recent Analyst Actions**: last 5 upgrades/downgrades from `tkr.upgrades_downgrades`
+- `tkr.info` is fetched **once** at the top of `api_extended` and reused for both extended-hours prices and analyst data
+
 ### Top Results table
-Each ticker in the results table is a **clickable blue link** — clicking opens the News+Price popup for that stock. Styled with `.ticker-sym:hover { text-decoration: underline }`.
+Each ticker in the results table is a **clickable blue link** — clicking opens the News+Price popup. A 📊 button next to each ticker opens the Market Intel modal. Styled with `.ticker-sym:hover { text-decoration: underline }`.
 
 ### ETF Holdings Report modal
 Opened via "View ETF Holdings" button. Shows each ETF row with:
 - ETF ticker (links to `finance.yahoo.com/quote/<TICKER>` — opens in new tab)
 - Full name, YTD %, daily %, current price, holdings count
 - All constituent tickers as Yahoo Finance hyperlinks (hover turns blue)
+
+### Shared JS helpers
+```js
+const _chg = ch => ({ arrow, color })   // ▲/▼ arrow + green/red color for a price change
+const _ir  = (label, val, vs='') => ... // renders one intel-row div (label + value)
+function _resetAh()                      // clears all AH state (_ahData, _ahFilterOnly, UI)
+function _setAhBtn(show, active)         // updates "Show all / Show only movers" button
+```
 
 ---
 
