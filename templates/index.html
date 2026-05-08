@@ -838,7 +838,8 @@
       <div id="intel-loading" style="padding:24px 0;text-align:center;color:var(--muted);">Loading…</div>
       <div id="intel-content" class="hidden"></div>
     </div>
-    <div class="modal-footer" style="justify-content:flex-end">
+    <div class="modal-footer" style="justify-content:center;gap:12px;">
+      <button onclick="openIntelModal(_intelTicker)">↻ Refresh</button>
       <button onclick="closeIntelModal()">Close</button>
     </div>
   </div>
@@ -846,7 +847,8 @@
 
 <script>
   // ── State ─────────────────────────────────────────────────────────
-  let pollTimer = null;
+  let pollTimer   = null;
+  let _intelTicker = null;
   let isRunning = false;
 
   // ── Helpers ───────────────────────────────────────────────────────
@@ -1604,6 +1606,7 @@
   }
 
   async function openIntelModal(ticker) {
+    _intelTicker = ticker;
     document.getElementById('intel-modal-title').textContent = `📊 ${ticker} — Market Intel`;
     document.getElementById('intel-loading').style.display = 'block';
     document.getElementById('intel-content').classList.add('hidden');
