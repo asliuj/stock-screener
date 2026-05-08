@@ -1622,6 +1622,10 @@
       if (!extRes.ok) throw new Error(`HTTP ${extRes.status}`);
       const [data, prices] = await Promise.all([extRes.json(), priceRes.json()]);
 
+      // Update title with company name if available
+      const titleEl = document.getElementById('intel-modal-title');
+      titleEl.textContent = data.name ? `📊 ${ticker} · ${data.name}` : `📊 ${ticker} — Market Intel`;
+
       // Price bar
       const p = prices[ticker];
       if (p) _renderPriceBar(document.getElementById('intel-price-bar'), p);

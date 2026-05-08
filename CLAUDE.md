@@ -292,13 +292,15 @@ Triggered by: clicking a ticker in Top Results, clicking a research stock ticker
 
 ### Market Intel modal (`📊 Intel`)
 Triggered by: 📊 button in Top Results, Research Stocks, or browse cards. Fetches `GET /api/extended/<ticker>` and `POST /api/prices` **in parallel**.
+- **Modal title**: `📊 TICKER · Company Name` — company name comes from `data.name` (`info["longName"]` or `info["shortName"]`); falls back to `📊 TICKER — Market Intel` if name unavailable. Title is set initially on open, then updated after data loads.
 - **Price bar** at top: current price, ▲/▼ % change + dollar change, MA20, MA50 (same bar as News+Price popup, rendered via shared `_renderPriceBar(barEl, d)` helper)
 - **Extended Hours**: after-hours and pre-market price + ▲/▼ % change
 - **Volume**: today's volume, 3-month average, ratio vs average (color-coded ≥2× = warn)
 - **Earnings**: next date, EPS estimate, revenue estimate (from `tkr.calendar`)
 - **Analyst Consensus**: recommendation, price target (mean/low/high), upside % (from `tkr.info`)
 - **Recent Analyst Actions**: last 5 upgrades/downgrades from `tkr.upgrades_downgrades`
-- `tkr.info` is fetched **once** at the top of `api_extended` and reused for both extended-hours prices and analyst data
+- `tkr.info` is fetched **once** at the top of `api_extended` and reused for name, extended-hours prices, and analyst data
+- `api_extended` response includes `name` field: `info.get("longName") or info.get("shortName") or ""`
 
 ### Top Results table
 Each ticker in the results table is a **clickable blue link** — clicking opens the News+Price popup. A 📊 button next to each ticker opens the Market Intel modal. Styled with `.ticker-sym:hover { text-decoration: underline }`.

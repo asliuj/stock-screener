@@ -751,7 +751,7 @@ def api_news(ticker):
 def api_extended(ticker):
     """After-hours/pre-market quote, earnings calendar, analyst consensus, and recent upgrades."""
     ticker = ticker.upper()
-    out = {"post_market": None, "pre_market": None, "volume": None, "earnings": None, "analyst": None, "upgrades": []}
+    out = {"name": "", "post_market": None, "pre_market": None, "volume": None, "earnings": None, "analyst": None, "upgrades": []}
     try:
         tkr  = yf.Ticker(ticker)
         fi   = tkr.fast_info
@@ -761,6 +761,8 @@ def api_extended(ticker):
             info = tkr.info or {}
         except Exception:
             info = {}
+
+        out["name"] = info.get("longName") or info.get("shortName") or ""
 
         last = (_safe_val(getattr(fi, "last_price", None))
                 or _safe_val(info.get("regularMarketPrice")) or 0)
