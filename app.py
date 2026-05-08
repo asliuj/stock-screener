@@ -849,30 +849,28 @@ def api_afterhours():
         return jsonify({})
 
     result = {}
+    lvl0 = lambda df: df.columns.get_level_values(0)
     for i in range(0, len(tickers), BATCH_SIZE):
         batch = tickers[i:i + BATCH_SIZE]
         try:
             ext = _yf_download(batch, period="1d", interval="5m", prepost=True)
             reg = _yf_download(batch, period="5d", interval="1d")
-            for ticker in batch:
+            for t in batch:
                 try:
-                    if ticker not in ext.columns.get_level_values(0): continue
-                    if ticker not in reg.columns.get_level_values(0): continue
-                    ext_c = ext[ticker]["Close"].dropna()
-                    reg_c = reg[ticker]["Close"].dropna()
+                    if t not in lvl0(ext) or t not in lvl0(reg): continue
+                    ext_c = ext[t]["Close"].dropna()
+                    reg_c = reg[t]["Close"].dropna()
                     if ext_c.empty or reg_c.empty: continue
-                    # Skip if last bar is still within regular market hours (9:30am–4pm ET)
                     last = ext_c.index[-1]
                     if getattr(last, "tz", None):
-                        et   = last.tz_convert("America/New_York")
-                        hhmm = et.hour * 100 + et.minute
-                        if 930 <= hhmm < 1600: continue
-                    reg_close = float(reg_c.iloc[-1])
-                    ah_price  = float(ext_c.iloc[-1])
-                    if not reg_close: continue
-                    pct = round((ah_price - reg_close) / reg_close * 100, 2)
+                        et = last.tz_convert("America/New_York")
+                        if 930 <= et.hour * 100 + et.minute < 1600: continue
+                    rc = float(reg_c.iloc[-1])
+                    ah = float(ext_c.iloc[-1])
+                    if not rc: continue
+                    pct = round((ah - rc) / rc * 100, 2)
                     if abs(pct) >= 0.01:
-                        result[ticker] = {"price": round(ah_price, 2), "pct": pct}
+                        result[t] = {"price": round(ah, 2), "pct": pct}
                 except Exception:
                     pass
         except Exception as e:
