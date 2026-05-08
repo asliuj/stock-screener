@@ -1451,71 +1451,58 @@
   }
 
   function filterBrowse(q) {
-    const term = q.trim().toUpperCase();
+    const term   = q.trim().toUpperCase();
     const byText = term ? _browseCards.filter(c => c.ticker.includes(term)) : _browseCards;
     renderBrowseCards(_ahFilterOnly ? applyAhFilter(byText) : applyAhFilter(applyPctFilter(byText)));
     if (_browsePrices) applyPricesToCards(_browsePrices);
     applyAfterHours();
   }
 
+  // AH helpers — shared state mutations
+  function _setAhBtn(show, active) {
+    const btn = document.getElementById('ah-filter-btn');
+    btn.style.display = show ? '' : 'none';
+    btn.classList.toggle('active-up', active);
+    btn.textContent = active ? 'Show all' : 'Show only movers';
+  }
+  function _resetAh() {
+    _ahData = null; _ahFilterOnly = false;
+    document.getElementById('ah-status').textContent = '';
+    _setAhBtn(false, false);
+  }
+
   async function toggleAfterHours(enabled) {
-    const status = document.getElementById('ah-status');
-    if (!enabled) {
-      _ahData = null;
-      _ahFilterOnly = false;
-      status.textContent = '';
-      const fb = document.getElementById('ah-filter-btn');
-      fb.style.display = 'none';
-      fb.classList.remove('active-up');
-      fb.textContent = 'Show only movers';
-      applyAfterHours();
-      filterBrowse(document.getElementById('browse-search').value);
-      return;
-    }
-    status.textContent = 'Fetching…';
-    const tickers = _browseCards.map(c => c.ticker);
+    if (!enabled) { _resetAh(); filterBrowse(document.getElementById('browse-search').value); return; }
+    const q = document.getElementById('browse-search').value;
+    document.getElementById('ah-status').textContent = 'Fetching…';
     try {
       const res = await fetch('/api/afterhours', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tickers }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickers: _browseCards.map(c => c.ticker) }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       _ahData = await res.json();
       const movers = Object.values(_ahData).filter(v => Math.abs(v.pct) >= 5).length;
-      status.textContent = movers > 0 ? `${movers} stock${movers !== 1 ? 's' : ''} with ≥5% move` : 'No significant movers';
-      const filterBtn = document.getElementById('ah-filter-btn');
-      if (movers > 0) {
-        _ahFilterOnly = true;
-        filterBtn.style.display = '';
-        filterBtn.classList.add('active-up');
-        filterBtn.textContent = 'Show all';
-      } else {
-        filterBtn.style.display = 'none';
-      }
+      document.getElementById('ah-status').textContent =
+        movers > 0 ? `${movers} stock${movers !== 1 ? 's' : ''} with ≥5% move` : 'No significant movers';
+      _ahFilterOnly = movers > 0;
+      _setAhBtn(movers > 0, movers > 0);
     } catch(e) {
-      status.textContent = 'Failed to load';
-      _ahData = null;
-      document.getElementById('ah-filter-btn').style.display = 'none';
+      document.getElementById('ah-status').textContent = 'Failed to load';
+      _ahData = null; _setAhBtn(false, false);
     }
-    applyAfterHours();
-    filterBrowse(document.getElementById('browse-search').value);
+    filterBrowse(q);
   }
 
   function toggleAhFilter() {
     _ahFilterOnly = !_ahFilterOnly;
-    const btn = document.getElementById('ah-filter-btn');
-    btn.classList.toggle('active-up', _ahFilterOnly);
-    btn.textContent = _ahFilterOnly ? 'Show all' : 'Show only movers';
+    _setAhBtn(true, _ahFilterOnly);
     filterBrowse(document.getElementById('browse-search').value);
   }
 
   function applyAhFilter(cards) {
     if (!_ahFilterOnly || !_ahData) return cards;
-    return cards.filter(c => {
-      const d = _ahData[c.ticker];
-      return d && Math.abs(d.pct) >= 5;
-    });
+    return cards.filter(c => { const d = _ahData[c.ticker]; return d && Math.abs(d.pct) >= 5; });
   }
 
   function applyAfterHours() {
@@ -1524,24 +1511,16 @@
       if (!badge) return;
       const d = _ahData?.[card.dataset.ticker];
       if (!d || Math.abs(d.pct) < 5) { badge.style.display = 'none'; return; }
-      const up = d.pct > 0;
-      badge.className = `ah-badge ${up ? 'ah-up' : 'ah-down'}`;
-      badge.textContent = `${up ? '▲' : '▼'} ${Math.abs(d.pct).toFixed(1)}% AH`;
+      badge.className = `ah-badge ${d.pct > 0 ? 'ah-up' : 'ah-down'}`;
+      badge.textContent = `${d.pct > 0 ? '▲' : '▼'} ${Math.abs(d.pct).toFixed(1)}% AH`;
       badge.style.display = '';
     });
   }
 
   function closeBrowseModal() {
     document.getElementById('browse-modal').classList.add('hidden');
-    const toggle = document.getElementById('ah-toggle');
-    if (toggle) toggle.checked = false;
-    document.getElementById('ah-status').textContent = '';
-    const filterBtn = document.getElementById('ah-filter-btn');
-    filterBtn.style.display = 'none';
-    filterBtn.classList.remove('active-up');
-    filterBtn.textContent = 'Show only movers';
-    _ahData = null;
-    _ahFilterOnly = false;
+    document.getElementById('ah-toggle').checked = false;
+    _resetAh();
   }
 
 
