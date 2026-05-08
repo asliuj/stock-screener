@@ -442,6 +442,73 @@ def _fetch_pe_cnbc(ticker: str) -> float | None:
         return None
 
 
+def _fetch_yf_summary(ticker: str) -> dict:
+    """
+    Direct Yahoo Finance quoteSummary API — used when yfinance rate-limits tkr.info.
+    Returns a dict with the same field names as tkr.info where possible, plus
+    '_earnings' and '_upgrades' keys pre-parsed for api_extended to consume.
+    """
+    try:
+        resp = requests.get(
+            f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker}",
+            params={"modules": "price,financialData,calendarEvents,upgradeDowngradeHistory,summaryDetail"},
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+            timeout=12,
+        )
+        if resp.status_code != 200:
+            return {}
+        result = (resp.json().get("quoteSummary", {}).get("result") or [{}])[0]
+
+        def rv(d, k):
+            v = d.get(k)
+            return v.get("raw") if isinstance(v, dict) else v
+
+        p, fd, sd = result.get("price", {}), result.get("financialData", {}), result.get("summaryDetail", {})
+
+        info: dict = {
+            "regularMarketPrice":       rv(p,  "regularMarketPrice"),
+            "postMarketPrice":          rv(p,  "postMarketPrice"),
+            "preMarketPrice":           rv(p,  "preMarketPrice"),
+            "regularMarketVolume":      rv(p,  "regularMarketVolume"),
+            "averageVolume":            rv(sd, "averageVolume"),
+            "averageDailyVolume3Month": rv(sd, "averageVolume10days"),
+            "currentPrice":             rv(fd, "currentPrice"),
+            "recommendationKey":        fd.get("recommendationKey"),
+            "numberOfAnalystOpinions":  rv(fd, "numberOfAnalystOpinions"),
+            "targetMeanPrice":          rv(fd, "targetMeanPrice"),
+            "targetLowPrice":           rv(fd, "targetLowPrice"),
+            "targetHighPrice":          rv(fd, "targetHighPrice"),
+        }
+
+        # Earnings
+        earnings = result.get("calendarEvents", {}).get("earnings", {})
+        dates = earnings.get("earningsDate", [])
+        if dates:
+            ts = dates[0].get("raw") if isinstance(dates[0], dict) else dates[0]
+            info["_earnings"] = {
+                "next_date":        datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else None,
+                "eps_estimate":     rv(earnings, "earningsAverage"),
+                "revenue_estimate": rv(earnings, "revenueAverage"),
+            }
+
+        # Upgrades / downgrades
+        history = result.get("upgradeDowngradeHistory", {}).get("history", [])[:5]
+        if history:
+            info["_upgrades"] = [
+                {"date":   datetime.fromtimestamp(h.get("epochGradeDate", 0)).strftime("%Y-%m-%d"),
+                 "firm":   h.get("firm", ""),
+                 "to":     h.get("toGrade", ""),
+                 "from":   h.get("fromGrade", ""),
+                 "action": h.get("action", "")}
+                for h in history
+            ]
+
+        return {k: v for k, v in info.items() if v is not None}
+    except Exception as e:
+        log.debug(f"YF summary fallback failed for {ticker}: {e}")
+        return {}
+
+
 def screen_batch(tickers: list[str], pe_max: float, rsi_min: float, rsi_max: float, vol_ratio_min: float) -> list[dict]:
     """Download and screen a batch of tickers. Returns passing stocks."""
     # Try yfinance batch download; fall back to per-ticker Stooq on rate limit
@@ -756,11 +823,13 @@ def api_extended(ticker):
         tkr  = yf.Ticker(ticker)
         fi   = tkr.fast_info
 
-        # Fetch info once — used for both after-hours prices and analyst consensus
+        # Fetch info — fall back to direct quoteSummary API if yfinance rate-limits
         try:
             info = tkr.info or {}
         except Exception:
             info = {}
+        if not info:
+            info = _fetch_yf_summary(ticker)
 
         last = (_safe_val(getattr(fi, "last_price", None))
                 or _safe_val(info.get("regularMarketPrice")) or 0)
@@ -804,6 +873,8 @@ def api_extended(ticker):
                 }
         except Exception:
             pass
+        if not out["earnings"] and info.get("_earnings"):
+            out["earnings"] = info["_earnings"]
 
         # Analyst consensus — reuse info already fetched above
         if info:
@@ -834,6 +905,8 @@ def api_extended(ticker):
                 ]
         except Exception:
             pass
+        if not out["upgrades"] and info.get("_upgrades"):
+            out["upgrades"] = info["_upgrades"]
 
     except Exception as e:
         log.debug(f"Extended data failed for {ticker}: {e}")
