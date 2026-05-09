@@ -932,28 +932,21 @@ def print_holdings_table():
     print("=" * (col + 16) + "\n")
 
 
-if __name__ == "__main__":
-    print("\n" + "=" * 50)
-    print("  STOCK SCREENER — Startup")
-    print("=" * 50)
-
-    answer = input("  Update ETF stock list before starting? (y/n): ").strip().lower()
-
-    if answer == "y":
-        print("  Fetching holdings for all ETFs…\n")
-        refresh_holdings()
-        print_holdings_table()
+def _auto_startup():
+    """Load cache at startup; refresh in background if cache is missing/stale."""
+    loaded = load_holdings_cache()
+    if loaded:
+        with _holdings_lock:
+            _holdings_meta.update(status="ready",
+                                  message=f"Holdings loaded from cache — {_holdings_meta['updated']}")
+        log.info(f"Holdings loaded from cache ({_holdings_meta['updated']})")
     else:
-        loaded = load_holdings_cache()
-        if loaded:
-            with _holdings_lock:
-                _holdings_meta.update(status="ready",
-                                      message=f"Holdings loaded from cache — {_holdings_meta['updated']}")
-            print(f"  Holdings loaded from cache ({_holdings_meta['updated']}).\n")
-        else:
-            print("  No current cache found — fetching holdings now…\n")
-            refresh_holdings()
-            print_holdings_table()
+        log.info("No current cache — refreshing holdings in background…")
+        threading.Thread(target=refresh_holdings, daemon=True).start()
 
-    log.info(f"Starting Stock Screener on http://localhost:{PORT}")
-    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
+_auto_startup()
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", PORT))
+    log.info(f"Starting Stock Screener on http://localhost:{port}")
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
