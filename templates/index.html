@@ -1350,10 +1350,9 @@
   function applyPctFilter(cards) {
     if (!_browsePrices) return cards;  // prices not loaded yet — show all
     const { min, max } = _browseFilter;
-    const filterActive = min !== null || max !== null;
     return cards.filter(c => {
       const d = _browsePrices[c.ticker];
-      if (!d) return !filterActive;  // no price: show under "All", hide under active filter
+      if (!d) return false;  // no price data — always hide
       if (min !== null && d.pct < min) return false;
       if (max !== null && d.pct > max) return false;
       return true;
