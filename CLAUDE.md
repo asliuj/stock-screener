@@ -103,24 +103,16 @@ These appear at the **top** of the ETF Holdings Report modal as the "Stock Marke
 
 ## Startup Flow
 
-Every time `python app.py` is run the user is **always** prompted:
+`_auto_startup()` runs at module import (works for both `python app.py` and gunicorn):
+- Cache exists and is current month → loads from disk, marks holdings ready
+- Cache missing or stale → triggers a full refresh in a **background thread** so Flask starts immediately
 
-```
-Update ETF stock list before starting? (y/n):
-```
+To manually trigger a re-fetch after startup, use the **🔄 Refresh** button in the ETF Holdings panel or `POST /api/holdings/refresh`.
 
-This prompt must never be skipped. The user decides on every launch whether to refresh.
-
-**Answer `y` — Full holdings refresh (NO shortcuts):**
-1. Iterates all 39 ETFs/indices in order and fetches each one's **complete** constituent ticker list using the 6-source priority pipeline below — every source is tried in sequence; the first one that returns valid data wins
-2. Saves the result to `holdings_cache.json` with today's date
-3. Prints the full ETF Holdings Summary table to the terminal (ETF name, count, and all tickers)
-4. Starts Flask on port 8080
-5. **The ETF Holdings Report modal opens automatically** when the browser first loads after a fresh refresh — this is non-negotiable; do not skip this step
-
-**Answer `n` — Load from cache:**
-- Cache exists and was fetched this calendar month → loads from disk immediately, Flask starts
-- Cache is missing or stale → triggers a full synchronous refresh using the same 6-source pipeline (no shortcuts), then **auto-opens the ETF Holdings Report modal** in the browser when the refresh completes
+**Full holdings refresh** (NO shortcuts):
+1. Iterates all 39 ETFs/indices using the 6-source priority pipeline — first source with valid data wins
+2. Saves result to `holdings_cache.json` with today's date
+3. **The ETF Holdings Report modal opens automatically** in the browser when the refresh completes — this is non-negotiable
 
 ---
 
@@ -261,6 +253,7 @@ Solid color replacements for semi-transparent backgrounds (work on white surface
 |-------|---------|
 | `GET /api/holdings` | Lightweight status poll (`{status, updated, message, counts, fresh_fetch}`) — safe every 2s |
 | `GET /api/holdings/data` | Full payload (`{tickers, weights, names}`) — call once on demand |
+| `POST /api/holdings/refresh` | Trigger full background re-fetch; returns 409 if already loading |
 | `POST /api/prices` | Price + MA20/MA50 for a ticker list; uses `period="3mo"` for MA50 data |
 | `GET /api/etf-performance` | YTD%, daily%, price for all ETFs; 5-min TTL cache |
 | `GET /api/news/<ticker>` | yfinance news articles + 5 external link URLs |
@@ -277,6 +270,7 @@ Solid color replacements for semi-transparent backgrounds (work on white surface
 Shared parser for SSGA and iShares DataFrames. Extracts tickers, weights, and names.
 - **Critical**: ticker values are extracted via `[str(v).strip() for v in df[tcol]]` (Python list comprehension), NOT `df[tcol].astype(str)`. Newer pandas StringDtype columns leave `pd.NA` as a float-like NaN object rather than the string `"nan"`, which causes `AttributeError: 'float' has no attribute 'startswith'` on the Cash-filter check. Python's `str()` always returns a real string.
 - Invalid tickers are filtered via `_INVALID_TICKER = frozenset(("", "-", "nan", "<NA>", "None"))`.
+- **Asset class filter**: if an `Asset Class` column is present, rows are pre-filtered to `"equity"` only — removes Cash, Futures, Money Market rows that would otherwise leak through as false tickers.
 
 ### stockanalysis.com weight supplementation
 `_fetch_stockanalysis(sym_lower)` returns `(tickers, weights)`. For SSGA, iShares, and Vanguard sources, if the primary source returns no weights, `_fetch_stockanalysis(sym_lower)[1]` is used as a fallback weight supplement (top ~25 free tier). QQQ (Wikipedia) and NATO always use stockanalysis.com for weights.
@@ -284,7 +278,7 @@ Shared parser for SSGA and iShares DataFrames. Extracts tickers, weights, and na
 ### Page layout (three panels)
 The main page has three distinct control panels, each a `controls-panel` card:
 
-1. **ETF Holdings panel** — "Browse All Holdings" button (top-right of panel) + Select All checkbox + ETF group checkboxes. Defense group is forced onto its own flex row (line break injected before `defense` and `blackrock` groups in `initGroupCheckboxes`).
+1. **ETF Holdings panel** — **🔄 Refresh** button + **🗂 Expand Stocks** button (top-right of panel) + Select All checkbox + ETF group checkboxes. Defense group is forced onto its own flex row (line break injected before `defense` and `blackrock` groups in `initGroupCheckboxes`). Refresh button calls `POST /api/holdings/refresh` and clears `_holdingsCache`.
 2. **Research Stocks panel** — standalone panel containing only `#research-group-container`.
 3. **Stock Momentum panel** — unified panel containing: filter inputs (P/E Max, RSI Min, RSI Max, Volume Ratio Min) + Run Scan button, divider, status bar, stat cards (Universe / Screened / Passed Filters / Showing), divider, Top Results table. All in one `controls-panel` with `flex-direction:column`.
 
@@ -379,8 +373,16 @@ python app.py
 netstat -ano | findstr ":8080" | ForEach-Object { ($_ -split '\s+')[-1] } | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 ```
 
+## Render Deployment (Public Website)
+- **URL**: deployed on Render.com (free tier)
+- **Files added**: `Procfile` (`gunicorn app:app --workers=1 --threads=4 --timeout=120`), `runtime.txt` (`python-3.11.9`)
+- **Startup**: `_auto_startup()` runs at module import — loads cache or refreshes in background thread; no interactive prompt
+- **Port**: reads `$PORT` env var (Render assigns dynamically); falls back to `8080` locally
+- **Holdings cache**: `holdings_cache.json` is committed to the repo (removed from `.gitignore`) so Render always has data on deploy without re-fetching
+- **Free tier caveat**: spins down after 15 min idle; first request after idle takes ~30s to wake up
+
 ## GitHub Backup
-- Repo: `https://github.com/asliuj/stock-screener` (private)
+- Repo: `https://github.com/asliuj/stock-screener` (now **public**)
 - **Hourly auto-backup**: `backup.ps1` runs via Windows Task Scheduler task `StockScreenerGitBackup` every hour at :13 — commits and pushes any modified tracked files, logs to `backup.log`
-- `holdings_cache.json` and `backup.log` are in `.gitignore` (not committed)
+- `backup.log` is in `.gitignore` (not committed); `holdings_cache.json` IS now committed
 - To manage the task: `Get-ScheduledTask -TaskName StockScreenerGitBackup` / `Unregister-ScheduledTask -TaskName StockScreenerGitBackup`
