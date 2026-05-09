@@ -142,6 +142,10 @@ _INVALID_TICKER = frozenset(("", "-", "nan", "<NA>", "None"))
 
 def _parse_df_holdings(df: pd.DataFrame, tcol: str) -> tuple[list[str], dict, dict]:
     """Extract (tickers, weights, names) from a DataFrame given the ticker column name."""
+    # Filter to equity rows only when an Asset Class column is present
+    ac_col = next((c for c in df.columns if str(c).lower().replace(" ", "") == "assetclass"), None)
+    if ac_col:
+        df = df[df[ac_col].astype(str).str.strip().str.lower() == "equity"]
     wcol = next((c for c in df.columns if "weight" in str(c).lower()), None)
     ncol = next((c for c in df.columns if str(c).lower().strip() in ("name", "security name", "issuer")), None)
     # Use str(v) via list comprehension — pandas .astype(str) on StringDtype columns
