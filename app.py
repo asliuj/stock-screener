@@ -639,6 +639,18 @@ def api_holdings():
         })
 
 
+@app.route("/api/holdings/refresh", methods=["POST"])
+def api_holdings_refresh():
+    """Trigger a full holdings refresh in the background."""
+    with _holdings_lock:
+        if _holdings_meta["status"] == "loading":
+            return jsonify({"ok": False, "message": "Refresh already in progress"}), 409
+        _holdings_meta["status"] = "loading"
+        _holdings_meta["message"] = "Refreshing ETF holdings…"
+    threading.Thread(target=refresh_holdings, daemon=True).start()
+    return jsonify({"ok": True, "message": "Refresh started"})
+
+
 @app.route("/api/holdings/data")
 def api_holdings_data():
     """Full tickers/weights/names — call once on demand, not on a poll loop."""
@@ -759,7 +771,8 @@ def api_extended(ticker):
         # Fetch info once — used for both after-hours prices and analyst consensus
         try:
             info = tkr.info or {}
-        except Exception:
+        except Exception as e:
+            log.warning(f"tkr.info failed for {ticker}: {e}")
             info = {}
 
         out["name"] = info.get("longName") or info.get("shortName") or ""
@@ -782,9 +795,11 @@ def api_extended(ticker):
             except Exception:
                 pass
 
-        # Volume
-        vol     = info.get("regularMarketVolume") or info.get("volume")
-        avg_vol = info.get("averageVolume") or info.get("averageDailyVolume3Month")
+        # Volume — info first, fast_info as fallback
+        vol     = (info.get("regularMarketVolume") or info.get("volume")
+                   or _safe_val(getattr(fi, "last_volume", None)))
+        avg_vol = (info.get("averageVolume") or info.get("averageDailyVolume3Month")
+                   or _safe_val(getattr(fi, "three_month_average_volume", None)))
         if vol:
             out["volume"] = {
                 "today":   int(vol),
@@ -838,7 +853,7 @@ def api_extended(ticker):
             pass
 
     except Exception as e:
-        log.debug(f"Extended data failed for {ticker}: {e}")
+        log.warning(f"Extended data failed for {ticker}: {e}")
 
     return jsonify(out)
 

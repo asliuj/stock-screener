@@ -656,6 +656,7 @@
           <input type="checkbox" id="cb-select-all" checked onchange="toggleAllEtfs(this.checked)">
           Select All
         </label>
+        <button id="refresh-holdings-btn" class="header-btn" onclick="refreshHoldings()" title="Refresh ETF holdings list" style="background:none;border:1px solid var(--border);color:var(--muted);padding:5px 10px;font-size:12px;">🔄 Refresh</button>
         <button id="browse-btn" class="header-btn" onclick="openBrowseModal()">🗂 Expand Stocks</button>
       </div>
     </div>
@@ -1220,6 +1221,19 @@
     }
     holdingsReady = data.status === 'ready';
     document.getElementById('run-btn').disabled = !holdingsReady || isRunning;
+  }
+
+  async function refreshHoldings() {
+    const btn = document.getElementById('refresh-holdings-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Refreshing…';
+    try {
+      const res = await fetch('/api/holdings/refresh', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { alert(data.message || 'Refresh already in progress'); }
+      else { btn.textContent = '🔄 Refreshing…'; _holdingsCache = null; }
+    } catch { alert('Could not start refresh — is the server running?'); }
+    finally { setTimeout(() => { btn.disabled = false; btn.textContent = '🔄 Refresh'; }, 3000); }
   }
 
   function pollHoldings() {
