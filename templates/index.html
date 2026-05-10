@@ -1759,17 +1759,22 @@
         const fmtVal    = n => n != null ? '$' + (n >= 1e6 ? (n/1e6).toFixed(2)+'M' : n.toLocaleString()) : '—';
         html += `<div class="intel-section"><div class="intel-section-title">🏦 Insider Transactions</div>
           <table class="insider-table">
-            <thead><tr><th>Date</th><th>Insider</th><th>Title</th><th>Type</th><th>Shares</th><th>Value</th></tr></thead>
+            <thead><tr><th>Date</th><th>Insider</th><th>Title</th><th>Type</th><th>Shares</th><th>$ Value</th><th>$ Exercise</th></tr></thead>
             <tbody>${data.insider.map(r => {
-              const isSale = r.type === 'Sale';
-              const color  = isSale ? 'var(--danger)' : r.type === 'Purchase' ? 'var(--green)' : 'var(--muted)';
+              const isSale     = r.type === 'Sale';
+              const isPurchase = r.type === 'Purchase';
+              const isOther    = !isSale && !isPurchase;
+              const color      = isSale ? 'var(--danger)' : isPurchase ? 'var(--green)' : 'var(--muted)';
+              const saleVal    = isSale || isPurchase ? fmtVal(r.value) : '—';
+              const exerVal    = isOther ? fmtVal(r.value) : '—';
               return `<tr>
                 <td>${_fmtDate(r.date)}</td>
                 <td style="font-weight:600">${r.insider}</td>
                 <td style="color:var(--muted);font-size:11px">${r.position}</td>
                 <td style="color:${color};font-weight:600">${r.type}</td>
                 <td>${fmtShares(r.shares)}</td>
-                <td>${fmtVal(r.value)}</td>
+                <td>${saleVal}</td>
+                <td>${exerVal}</td>
               </tr>`;
             }).join('')}</tbody>
           </table>
