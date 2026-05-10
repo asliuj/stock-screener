@@ -361,6 +361,8 @@
     }
     .cb-label:hover { border-color: var(--blue); }
     .cb-label input[type=checkbox] { accent-color: var(--blue); width: 14px; height: 14px; cursor: pointer; }
+    .etf-pill-wrap { display: flex; flex-direction: column; align-items: center; line-height: 1; }
+    .etf-count { font-size: 9px; font-weight: 500; color: var(--muted); margin-top: 2px; }
     .etf-groups { display: flex; flex-wrap: wrap; gap: 12px; }
     .etf-group { display: flex; flex-direction: column; gap: 6px; }
     .etf-group-header { display: flex; align-items: center; gap: 6px; }
@@ -1221,6 +1223,11 @@
     }
     holdingsReady = data.status === 'ready';
     document.getElementById('run-btn').disabled = !holdingsReady || isRunning;
+    const counts = data.counts || {};
+    Object.entries(counts).forEach(([etf, n]) => {
+      const el = document.getElementById(`etf-count-${etf}`);
+      if (el) el.textContent = n;
+    });
   }
 
   async function refreshHoldings() {
@@ -1285,7 +1292,7 @@
           <label class="etf-group-label" for="grp-${g.id}">${g.label}</label>
         </div>
         <div class="etf-group-checks">
-          ${g.etfs.map(e => `<label class="cb-label"><input type="checkbox" class="etf-check" value="${e}" data-group="${g.id}" checked> ${e.toUpperCase()}</label>`).join('')}
+          ${g.etfs.map(e => `<label class="cb-label"><input type="checkbox" class="etf-check" value="${e}" data-group="${g.id}" checked> <span class="etf-pill-wrap">${e.toUpperCase()}<span class="etf-count" id="etf-count-${e}"></span></span></label>`).join('')}
         </div>
       </div>`).join('');
 
