@@ -278,20 +278,21 @@ Shared parser for SSGA and iShares DataFrames. Extracts tickers, weights, and na
 ### Page layout (three panels)
 The main page has three distinct control panels, each a `controls-panel` card:
 
-1. **ETF Holdings panel** — **🔄 Refresh** button + **🗂 Expand Stocks** button (top-right of panel) + Select All checkbox + ETF group checkboxes. Defense group is forced onto its own flex row (line break injected before `defense` and `blackrock` groups in `initGroupCheckboxes`). Refresh button calls `POST /api/holdings/refresh` and clears `_holdingsCache`.
+1. **ETF Holdings panel** — **🔄 Refresh** button + **🗂 Expand Stocks** button (top-right of panel) + Select All checkbox + ETF group checkboxes. Defense group is forced onto its own flex row (line break injected before `defense` and `blackrock` groups in `initGroupCheckboxes`). Refresh button calls `POST /api/holdings/refresh` and clears `_holdingsCache`. Each ETF pill shows its holdings count in small text below the ticker (`<span class="etf-count" id="etf-count-{etf}">`), populated by `updateHoldingsUI()` from `data.counts`.
 2. **Research Stocks panel** — standalone panel containing only `#research-group-container`.
 3. **Stock Momentum panel** — unified panel containing: filter inputs (P/E Max, RSI Min, RSI Max, Volume Ratio Min) + Run Scan button, divider, status bar, stat cards (Universe / Screened / Passed Filters / Showing), divider, Top Results table. All in one `controls-panel` with `flex-direction:column`.
 
 Header contains only: logo (left), "View ETF Holdings" button (center), "Last run" timestamp (right).
 
-### Browse All Holdings modal
-Opened via the "Browse All Holdings" button inside the ETF Holdings panel. Shows all constituent stocks from selected ETFs with:
+### Expand Stocks modal (Browse All Holdings)
+Opened via the **🗂 Expand Stocks** button inside the ETF Holdings panel. Shows all constituent stocks from selected ETFs with:
+- **Dynamic title** (`#browse-modal-title`): single ETF selected → `🗂 {TICKER} — {Full ETF Name}`; multiple → `🗂 N Selected ETFs`
 - ETF badge(s) with fund weight % (e.g. "VGT 18.53%") — sorted by highest fund weight first
 - Current price + ▲/▼ daily change % (fetched async via `POST /api/prices`)
 - MA20 and MA50 (same async fetch, requires `period="3mo"` to have enough data)
 - Company name
 - **% change filter row**: preset buttons (All, Gainers, >5%/>10%/>15%, Losers, >5%/>10%/>15%) plus custom Min/Max inputs
-- **Stocks with no price data are hidden** once prices finish loading
+- **Stocks with no price data are hidden** once prices finish loading (hidden under all filter states including "All")
 - **⏰ After-hours alerts checkbox**: fetches `POST /api/afterhours` for all visible tickers; overlays a green/red pill badge (e.g. `▲ 7.3% AH`) on cards with ≥5% extended-hours movement; auto-filters grid to movers-only on enable; "Show all" button toggles back
 - **📰 News button** on each card opens the News modal
 - **📊 Intel button** on each card opens the Market Intel modal
