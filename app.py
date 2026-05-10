@@ -767,7 +767,7 @@ def api_news(ticker):
 def api_extended(ticker):
     """After-hours/pre-market quote, earnings calendar, analyst consensus, and recent upgrades."""
     ticker = ticker.upper()
-    out = {"name": "", "post_market": None, "pre_market": None, "volume": None, "earnings": None, "analyst": None, "upgrades": []}
+    out = {"name": "", "post_market": None, "pre_market": None, "volume": None, "earnings": None, "analyst": None, "upgrades": [], "insider": []}
     try:
         tkr  = yf.Ticker(ticker)
         fi   = tkr.fast_info
@@ -853,6 +853,33 @@ def api_extended(ticker):
                      "action": str(row.get("Action", ""))}
                     for idx, row in ud.iterrows()
                 ]
+        except Exception:
+            pass
+
+        # Insider transactions
+        try:
+            it = tkr.insider_transactions
+            if it is not None and not it.empty:
+                it = it.head(10)
+                rows = []
+                for _, row in it.iterrows():
+                    text = str(row.get("Text", "") or "")
+                    txn  = ("Sale" if "sale" in text.lower()
+                            else "Purchase" if "purchase" in text.lower()
+                            else "Other")
+                    shares = row.get("Shares")
+                    value  = row.get("Value")
+                    rows.append({
+                        "date":     str(row.get("Start Date", ""))[:10],
+                        "insider":  str(row.get("Insider", "") or "").title(),
+                        "position": str(row.get("Position", "") or ""),
+                        "type":     txn,
+                        "shares":   int(shares) if shares and not pd.isna(shares) else None,
+                        "value":    int(value)  if value  and not pd.isna(value)  else None,
+                        "ownership":str(row.get("Ownership", "") or ""),
+                    })
+                if rows:
+                    out["insider"] = rows
         except Exception:
             pass
 

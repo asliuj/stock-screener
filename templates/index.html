@@ -592,6 +592,11 @@
       display: inline-block; font-size: 10px; font-weight: 700;
       padding: 1px 6px; border-radius: 10px; margin-left: 6px; text-transform: uppercase;
     }
+    .insider-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+    .insider-table th { text-align: left; font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; padding: 4px 6px 6px; border-bottom: 1px solid var(--border); }
+    .insider-table td { padding: 6px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .insider-table tr:last-child td { border-bottom: none; }
+    .insider-table tr:hover td { background: var(--bg); }
     .intel-up      { background: #d6f0da; border: 1px solid #90cc98; color: var(--green); }
     .intel-down    { background: #fde0e0; border: 1px solid #f0a0a0; color: var(--danger); }
     .intel-neutral { background: var(--surface2); border: 1px solid var(--border); color: var(--muted); }
@@ -1745,6 +1750,29 @@
                   : u.to ? `<span style="color:var(--muted)"> · ${u.to}</span>` : ''}
                 ${u.action ? `<span class="intel-action ${_actionClass(u.action)}">${u.action}</span>` : ''}
               </span></div>`).join('')}
+        </div>`;
+      }
+
+      // Insider transactions
+      if (data.insider?.length) {
+        const fmtShares = n => n != null ? n.toLocaleString() : '—';
+        const fmtVal    = n => n != null ? '$' + (n >= 1e6 ? (n/1e6).toFixed(2)+'M' : n.toLocaleString()) : '—';
+        html += `<div class="intel-section"><div class="intel-section-title">🏦 Insider Transactions</div>
+          <table class="insider-table">
+            <thead><tr><th>Date</th><th>Insider</th><th>Title</th><th>Type</th><th>Shares</th><th>Value</th></tr></thead>
+            <tbody>${data.insider.map(r => {
+              const isSale = r.type === 'Sale';
+              const color  = isSale ? 'var(--danger)' : r.type === 'Purchase' ? 'var(--green)' : 'var(--muted)';
+              return `<tr>
+                <td>${_fmtDate(r.date)}</td>
+                <td style="font-weight:600">${r.insider}</td>
+                <td style="color:var(--muted);font-size:11px">${r.position}</td>
+                <td style="color:${color};font-weight:600">${r.type}</td>
+                <td>${fmtShares(r.shares)}</td>
+                <td>${fmtVal(r.value)}</td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>
         </div>`;
       }
 
