@@ -1297,7 +1297,7 @@
           <label class="etf-group-label" for="grp-${g.id}">${g.label}</label>
         </div>
         <div class="etf-group-checks">
-          ${g.etfs.map(e => `<label class="cb-label"><input type="checkbox" class="etf-check" value="${e}" data-group="${g.id}" checked> <span class="etf-pill-wrap">${e.toUpperCase()}<span class="etf-count" id="etf-count-${e}"></span></span></label>`).join('')}
+          ${g.etfs.map(e => `<label class="cb-label" title="${ETF_NAMES[e] || e.toUpperCase()}"><input type="checkbox" class="etf-check" value="${e}" data-group="${g.id}" checked> <span class="etf-pill-wrap">${e.toUpperCase()}<span class="etf-count" id="etf-count-${e}"></span></span></label>`).join('')}
         </div>
       </div>`).join('');
 
