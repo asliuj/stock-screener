@@ -772,7 +772,7 @@
 <div id="browse-modal" class="modal-overlay hidden">
   <div class="modal">
     <div class="modal-header">
-      <span class="modal-title">🗂 All Holdings — Selected ETFs</span>
+      <span class="modal-title" id="browse-modal-title">🗂 All Holdings — Selected ETFs</span>
       <button class="modal-close" onclick="closeBrowseModal()">✕</button>
     </div>
     <div class="modal-body">
@@ -1371,6 +1371,15 @@
       Array.from(document.querySelectorAll('input.etf-check:checked')).map(el => el.value)
     );
     if (selected.size === 0) { alert('Select at least one ETF first.'); return; }
+
+    const titleEl = document.getElementById('browse-modal-title');
+    if (selected.size === 1) {
+      const etf = [...selected][0];
+      const name = ETF_NAMES[etf.toLowerCase()] || etf.toUpperCase();
+      titleEl.textContent = `🗂 ${etf.toUpperCase()} — ${name}`;
+    } else {
+      titleEl.textContent = `🗂 ${selected.size} Selected ETFs`;
+    }
 
     try {
       if (!_holdingsCache) {
