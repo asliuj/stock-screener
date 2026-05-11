@@ -8,20 +8,20 @@
     /* ── Reset & Base ───────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg:        #f0f3f7;
+      --bg:        #f2f2f2;
       --surface:   #ffffff;
-      --surface2:  #f5f7fb;
-      --border:    #d0d7e2;
-      --accent:    #1a5fb4;
-      --accent-h:  #154d94;
-      --blue:      #1a5fb4;
-      --text:      #1a2535;
-      --muted:     #6b7b90;
-      --danger:    #c41a1a;
+      --surface2:  #f7f7f7;
+      --border:    #d6d6d6;
+      --accent:    #e31937;
+      --accent-h:  #b8102b;
+      --blue:      #e31937;
+      --text:      #000000;
+      --muted:     #666666;
+      --danger:    #e31937;
       --warn:      #b06800;
-      --green:     #1a8a2e;
+      --green:     #1a7a1a;
       --purple:    #6040b0;
-      --radius:    6px;
+      --radius:    4px;
       --shadow:    0 2px 8px rgba(0,0,0,.10);
     }
     html, body { height: 100%; }
@@ -35,8 +35,8 @@
 
     /* ── Header ─────────────────────────────────────────────────────── */
     header {
-      background: #0d1b2a;
-      border-bottom: 2px solid #1a5fb4;
+      background: #000000;
+      border-bottom: 3px solid #e31937;
       padding: 16px 32px;
       display: grid;
       grid-template-columns: 1fr auto 1fr;
@@ -133,7 +133,7 @@
     }
 
     /* ── Panel utilities ─────────────────────────────────────────────── */
-    .panel-label   { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .panel-label   { font-size: 11px; font-weight: 700; color: #000; text-transform: uppercase; letter-spacing: .8px; border-left: 3px solid var(--accent); padding-left: 8px; }
     .panel-divider { border-top: 1px solid var(--border); margin: 16px -24px; }
     .panel-row     { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-end; margin-bottom: 16px; }
 
@@ -147,7 +147,7 @@
     .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
     .stat-value { font-size: 22px; font-weight: 700; }
     .stat-value.green  { color: var(--green); }
-    .stat-value.blue   { color: var(--blue); }
+    .stat-value.blue   { color: var(--accent); }
     .stat-value.purple { color: var(--purple); }
     .stat-value.warn   { color: var(--warn); }
 
@@ -305,8 +305,8 @@
     /* ── ETF badges in results table ───────────────────────────────── */
     .etf-badge {
       display: inline-block;
-      background: #ddeaff;
-      border: 1px solid #aac4f0;
+      background: #fde8eb;
+      border: 1px solid #f0a0aa;
       border-radius: 12px;
       padding: 2px 8px;
       font-size: 14px;
@@ -494,7 +494,7 @@
     .filter-btn:hover { border-color: var(--blue); color: var(--text); }
     .filter-btn.active-up   { background: #d6f0da; border-color: var(--green);  color: var(--green);  }
     .filter-btn.active-down { background: #fde0e0; border-color: var(--danger); color: var(--danger); }
-    .filter-btn.active-all  { background: var(--surface2); border-color: var(--blue); color: var(--blue); }
+    .filter-btn.active-all  { background: #fde8eb; border-color: var(--accent); color: var(--accent); }
     .filter-sep { color: var(--border); font-size: 13px; }
     .filter-custom { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
     .filter-custom input {
