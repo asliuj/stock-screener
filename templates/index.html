@@ -412,6 +412,7 @@
     .modal-table th.col-name   { width: 200px; }
     .modal-table th.col-ytd    { width: 75px; text-align: right; }
     .modal-table th.col-today  { width: 110px; text-align: right; }
+    .modal-table th.col-er     { width: 60px; text-align: right; }
     .modal-table th.col-count  { width: 55px; text-align: right; }
     .modal-table th.col-tickers { }
     .modal-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -760,6 +761,7 @@
             <th class="col-name">Name</th>
             <th class="col-ytd">YTD</th>
             <th class="col-today">Today</th>
+            <th class="col-er">Exp. Ratio</th>
             <th class="col-count">Count</th>
             <th class="col-tickers">Tickers</th>
           </tr>
@@ -869,6 +871,7 @@
   let _intelTicker   = null;
   let isRunning      = false;
   let _holdingsCache = null;   // cached /api/holdings/data payload — refreshed on fresh_fetch
+  let _perfCache     = null;   // cached /api/etf-performance payload — 5-min TTL server-side
 
   const _debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
   const _filterBrowseDebounced = _debounce(q => filterBrowse(q), 180);
@@ -1106,6 +1109,7 @@
       const status  = await sRes.json();
       const data    = await dRes.json();
       const perf    = await pRes.json();
+      _perfCache = perf;
       showHoldingsModal({ ...status, ...data }, perf);
     } catch(e) {
       alert('Could not load holdings: ' + e.message);
@@ -1196,6 +1200,7 @@
       const name  = ETF_NAMES[etf] || '—';
       const p     = perf[etf] || {};
       const price = p.price != null ? '$' + p.price.toFixed(2) : '—';
+      const er    = p.expense_ratio != null ? p.expense_ratio.toFixed(2) + '%' : '—';
 
       return `<tr>
         <td class="modal-etf"><a href="${yf(etf.toUpperCase())}" target="_blank" rel="noopener">${etf.toUpperCase()}</a></td>
@@ -1205,6 +1210,7 @@
           <span style="color:${pctColor(p.daily)};font-weight:700">${fmtPct(p.daily)}</span>
           <span style="color:var(--muted);font-size:12px;margin-left:6px">${price}</span>
         </td>
+        <td style="color:var(--muted);text-align:right;white-space:nowrap">${er}</td>
         <td style="color:var(--muted);text-align:right">${(tickers[etf]||[]).length}</td>
         <td class="modal-tickers">${list}</td>
       </tr>`;
@@ -1384,9 +1390,18 @@
 
     const titleEl = document.getElementById('browse-modal-title');
     if (selected.size === 1) {
-      const etf = [...selected][0];
+      const etf  = [...selected][0];
       const name = ETF_NAMES[etf.toLowerCase()] || etf.toUpperCase();
+      const _setTitle = perfData => {
+        const er = perfData?.[etf]?.expense_ratio;
+        titleEl.textContent = `🗂 ${etf.toUpperCase()} — ${name}${er != null ? `  ·  ${er.toFixed(2)}% ER` : ''}`;
+      };
       titleEl.textContent = `🗂 ${etf.toUpperCase()} — ${name}`;
+      if (_perfCache) {
+        _setTitle(_perfCache);
+      } else {
+        fetch('/api/etf-performance').then(r => r.json()).then(p => { _perfCache = p; _setTitle(p); }).catch(() => {});
+      }
     } else {
       titleEl.textContent = `🗂 ${selected.size} Selected ETFs`;
     }

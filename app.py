@@ -665,22 +665,37 @@ def api_holdings_data():
 
 
 def _fetch_etf_performance() -> dict:
-    """Download YTD price data for all ETFs; return ytd%, daily%, and price."""
+    """Download YTD price data for all ETFs; return ytd%, daily%, price, and expense_ratio."""
     symbols = [e.upper() for e in ALL_ETFS]
-    result  = {e: {"ytd": None, "daily": None, "price": None} for e in ALL_ETFS}
+    result  = {e: {"ytd": None, "daily": None, "price": None, "expense_ratio": None} for e in ALL_ETFS}
     data = _yf_download(symbols, start=f"{datetime.now().year}-01-01")
     for etf in ALL_ETFS:
         try:
             closes = data[etf.upper()]["Close"].dropna()
             if len(closes) >= 2:
                 first, prev, last = float(closes.iloc[0]), float(closes.iloc[-2]), float(closes.iloc[-1])
-                result[etf] = {
+                result[etf].update({
                     "ytd":   round((last - first) / first * 100, 2),
                     "daily": round((last - prev)  / prev  * 100, 2),
                     "price": round(last, 2),
-                }
+                })
         except Exception:
             pass
+
+    def _get_expense_ratio(sym_lower: str) -> tuple[str, float | None]:
+        try:
+            info = yf.Ticker(sym_lower.upper()).info
+            er = info.get("netExpenseRatio") or info.get("annualReportExpenseRatio") or info.get("expenseRatio")
+            return sym_lower, round(float(er), 4) if er else None
+        except Exception:
+            return sym_lower, None
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = {pool.submit(_get_expense_ratio, e): e for e in ALL_ETFS}
+        for fut in as_completed(futures):
+            etf_key, er = fut.result()
+            result[etf_key]["expense_ratio"] = er
+
     return result
 
 
