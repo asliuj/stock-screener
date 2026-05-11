@@ -1119,6 +1119,7 @@
     { id: 'defense',   label: 'Defense',               etfs: ['xar','nato','ita','ppa','shld','war','idef','gcad'] },
     { id: 'blackrock', label: 'Blackrock — iShares',   etfs: ['ihak','iyh','iye','iyf','iyr','igv','ivv','iwf','iwm','efa'] },
     { id: 'vanguard',  label: 'Vanguard',              etfs: ['vgt','vfh','vht','vde','vis','vcr','vdc','vpu','vnq','vaw','vox'] },
+    { id: 'rag',       label: 'RAG — AI & Tech',       etfs: ['chat','igpt','arty','aiq'] },
   ];
   const GROUP_ORDER = ETF_GROUPS.flatMap(g => g.etfs);
 
@@ -1167,6 +1168,10 @@
     vnq:  'Vanguard Real Estate ETF',
     vaw:  'Vanguard Materials ETF',
     vox:  'Vanguard Communication Services ETF',
+    chat: 'Roundhill Generative AI & Technology ETF',
+    igpt: 'Invesco AI and Next Gen Software ETF',
+    arty: 'iShares Future AI & Tech ETF',
+    aiq:  'Global X Artificial Intelligence & Technology ETF',
   };
 
   // ── Holdings summary modal ────────────────────────────────────────
@@ -1290,7 +1295,7 @@
   function initGroupCheckboxes() {
     // Generate ETF group checkboxes from data
     document.getElementById('etf-groups-container').innerHTML = ETF_GROUPS.map(g => `
-      ${g.id === 'defense' || g.id === 'blackrock' ? '<div style="flex-basis:100%;height:0"></div>' : ''}
+      ${g.id === 'defense' || g.id === 'blackrock' || g.id === 'rag' ? '<div style="flex-basis:100%;height:0"></div>' : ''}
       <div class="etf-group">
         <div class="etf-group-header">
           <input type="checkbox" class="etf-group-all" id="grp-${g.id}" checked>

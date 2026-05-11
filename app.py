@@ -54,6 +54,8 @@ ALL_ETFS = [
     "ihak", "igv", "iyh", "iye", "iyf", "iyr", "ivv", "iwf", "iwm", "efa",
     # Vanguard
     "vgt", "vfh", "vht", "vde", "vis", "vcr", "vdc", "vpu", "vnq", "vaw", "vox",
+    # RAG (AI/Tech)
+    "chat", "igpt", "arty", "aiq",
 ]
 HOLDINGS_CACHE_FILE = os.path.join(os.path.dirname(__file__), "holdings_cache.json")
 _ALL_ETFS_SET = frozenset(ALL_ETFS)   # O(1) membership test
