@@ -784,7 +784,7 @@ def api_news(ticker):
 def api_extended(ticker):
     """After-hours/pre-market quote, earnings calendar, analyst consensus, and recent upgrades."""
     ticker = ticker.upper()
-    out = {"name": "", "post_market": None, "pre_market": None, "volume": None, "earnings": None, "analyst": None, "upgrades": [], "insider": []}
+    out = {"name": "", "post_market": None, "pre_market": None, "volume": None, "earnings": None, "dividend": None, "analyst": None, "upgrades": [], "insider": []}
     try:
         tkr  = yf.Ticker(ticker)
         fi   = tkr.fast_info
@@ -842,6 +842,25 @@ def api_extended(ticker):
                 }
         except Exception:
             pass
+
+        # Dividend info
+        if info:
+            rate  = _safe_val(info.get("dividendRate"))
+            yld   = _safe_val(info.get("dividendYield"))
+            ex_ts = info.get("exDividendDate")
+            ex_date = None
+            if ex_ts:
+                try:
+                    from datetime import datetime, timezone
+                    ex_date = datetime.fromtimestamp(ex_ts, tz=timezone.utc).strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+            if rate or yld:
+                out["dividend"] = {
+                    "rate":     round(rate, 4) if rate else None,
+                    "yield":    round(yld * 100, 2) if yld else None,
+                    "ex_date":  ex_date,
+                }
 
         # Analyst consensus — reuse info already fetched above
         if info:

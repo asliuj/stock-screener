@@ -1755,11 +1755,14 @@
 
       // Earnings
       const e = data.earnings;
-      if (e?.next_date) {
+      const dv = data.dividend;
+      if (e?.next_date || dv) {
         html += `<div class="intel-section"><div class="intel-section-title">📅 Earnings</div>
-          ${_ir('Next Date', _fmtDate(e.next_date))}
-          ${e.eps_estimate     != null ? _ir('EPS Estimate', '$' + e.eps_estimate.toFixed(2)) : ''}
-          ${e.revenue_estimate != null ? _ir('Revenue Est.', _fmtLarge(e.revenue_estimate)) : ''}
+          ${e?.next_date                ? _ir('Next Date',     _fmtDate(e.next_date)) : ''}
+          ${e?.eps_estimate     != null ? _ir('EPS Estimate',  '$' + e.eps_estimate.toFixed(2)) : ''}
+          ${e?.revenue_estimate != null ? _ir('Revenue Est.',  _fmtLarge(e.revenue_estimate)) : ''}
+          ${dv?.rate            != null ? _ir('Annual Payout', '$' + dv.rate.toFixed(2) + '/sh' + (dv.yield != null ? ' (' + dv.yield.toFixed(2) + '%)' : '')) : ''}
+          ${dv?.ex_date                 ? _ir('Ex-Div Date',   _fmtDate(dv.ex_date)) : ''}
         </div>`;
       }
 
