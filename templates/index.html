@@ -673,6 +673,17 @@
 
   <!-- Research Stocks panel -->
   <div class="controls-panel">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+      <label class="etf-group-label" style="color:var(--purple);white-space:nowrap">Research Stocks</label>
+      <input id="research-search-input" type="text" placeholder="Add ticker…"
+        style="flex:1;min-width:0;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);color:var(--text);outline:none"
+        onkeydown="if(event.key==='Enter')addResearchFromInput()"
+        oninput="this.value=this.value.toUpperCase()">
+      <button onclick="addResearchFromInput()"
+        style="padding:4px 10px;font-size:12px;font-weight:600;background:var(--blue);color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">
+        + Add
+      </button>
+    </div>
     <div id="research-group-container" style="width:100%"></div>
   </div>
 
@@ -939,23 +950,31 @@
     if (addBtn) { addBtn.textContent = '+ Portfolio'; addBtn.classList.remove('added'); }
   }
 
+  function addResearchFromInput() {
+    const inp = document.getElementById('research-search-input');
+    const ticker = inp.value.trim().toUpperCase();
+    if (!ticker) return;
+    const stocks = getResearch();
+    if (!stocks.includes(ticker)) {
+      saveResearch([...stocks, ticker]);
+      renderResearchGroup();
+    }
+    inp.value = '';
+    inp.focus();
+  }
+
   function renderResearchGroup() {
     const stocks    = getResearch();
     const container = document.getElementById('research-group-container');
     if (stocks.length === 0) { container.innerHTML = ''; return; }
     container.innerHTML = `
-      <div class="etf-group" style="margin-top:8px">
-        <div class="etf-group-header">
-          <label class="etf-group-label" style="color:var(--purple)">Research Stocks</label>
-        </div>
-        <div class="etf-group-checks">
-          ${stocks.map(t => `
-            <div class="research-stock-row">
-              <span class="research-ticker-link" onclick="openNewsModal('${t}')">${t}</span>
-              <button class="research-intel-btn" onclick="openIntelModal('${t}')" title="Market Intel">📊</button>
-              <button class="research-remove" onclick="removeFromResearch('${t}')" title="Remove">✕</button>
-            </div>`).join('')}
-        </div>
+      <div class="etf-group-checks" style="margin-top:4px">
+        ${stocks.map(t => `
+          <div class="research-stock-row">
+            <span class="research-ticker-link" onclick="openNewsModal('${t}')">${t}</span>
+            <button class="research-intel-btn" onclick="openIntelModal('${t}')" title="Market Intel">📊</button>
+            <button class="research-remove" onclick="removeFromResearch('${t}')" title="Remove">✕</button>
+          </div>`).join('')}
       </div>`;
   }
 
