@@ -780,6 +780,32 @@ def api_news(ticker):
     return jsonify({"news": articles, **links})
 
 
+@app.route("/api/search")
+def api_search():
+    """Search for tickers by company name using yfinance Search."""
+    q = request.args.get("q", "").strip()
+    if not q or len(q) < 2:
+        return jsonify([])
+    try:
+        results = yf.Search(q).quotes
+        out = []
+        for r in results:
+            qt = r.get("quoteType", "")
+            if qt not in ("EQUITY", "ETF", "INDEX"):
+                continue
+            symbol = r.get("symbol", "")
+            if not symbol or len(symbol) > 10:
+                continue
+            name = r.get("shortname") or r.get("longname") or ""
+            out.append({"symbol": symbol, "name": name, "type": qt})
+            if len(out) >= 8:
+                break
+        return jsonify(out)
+    except Exception as e:
+        log.warning(f"Symbol search failed: {e}")
+        return jsonify([])
+
+
 @app.route("/api/extended/<path:ticker>")
 def api_extended(ticker):
     """After-hours/pre-market quote, earnings calendar, analyst consensus, and recent upgrades."""

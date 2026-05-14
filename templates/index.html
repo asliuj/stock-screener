@@ -606,6 +606,14 @@
       cursor: pointer; font-size: 11px; padding: 0 2px; line-height: 1;
     }
     .research-intel-btn:hover { color: var(--blue); }
+    #symbol-search-wrap { position:relative; flex:1; min-width:0; }
+    #symbol-search-input { width:100%; box-sizing:border-box; padding:4px 8px; font-size:13px; border:1px solid var(--border); border-radius:4px; background:var(--surface2); color:var(--text); outline:none; }
+    #symbol-dropdown { position:absolute; top:100%; left:0; right:0; background:var(--surface); border:1px solid var(--border); border-top:none; border-radius:0 0 4px 4px; z-index:200; box-shadow:0 4px 12px rgba(0,0,0,.12); display:none; }
+    .symbol-result { padding:6px 10px; cursor:pointer; font-size:12px; display:flex; gap:8px; align-items:baseline; }
+    .symbol-result:hover { background:var(--surface2); }
+    .symbol-result-sym { font-weight:700; color:var(--blue); min-width:52px; }
+    .symbol-result-name { color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .symbol-result-type { font-size:10px; color:var(--muted); margin-left:auto; flex-shrink:0; }
 
     /* ── Footer ─────────────────────────────────────────────────────── */
     footer {
@@ -683,6 +691,14 @@
         style="padding:4px 10px;font-size:12px;font-weight:600;background:var(--blue);color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">
         + Add
       </button>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+      <label class="etf-group-label" style="color:var(--muted);font-size:11px;white-space:nowrap">Search by name</label>
+      <div id="symbol-search-wrap">
+        <input id="symbol-search-input" type="text" placeholder="e.g. Nvidia, JPMorgan…" autocomplete="off"
+          oninput="_onSymbolSearch(this.value)" onblur="_hideSymbolDropdown()" onkeydown="_symbolSearchKey(event)">
+        <div id="symbol-dropdown"></div>
+      </div>
     </div>
     <div id="research-group-container" style="width:100%"></div>
   </div>
@@ -948,6 +964,51 @@
     // Reflect removal in any open browse card
     const addBtn = document.getElementById(`add-btn-${ticker}`);
     if (addBtn) { addBtn.textContent = '+ Portfolio'; addBtn.classList.remove('added'); }
+  }
+
+  // ── Symbol search by company name ────────────────────────────────
+  let _symTimer = null, _symIdx = -1;
+  function _onSymbolSearch(val) {
+    clearTimeout(_symTimer);
+    const dd = document.getElementById('symbol-dropdown');
+    if (!val || val.length < 2) { dd.style.display = 'none'; return; }
+    _symTimer = setTimeout(async () => {
+      try {
+        const res  = await fetch('/api/search?q=' + encodeURIComponent(val));
+        const data = await res.json();
+        _symIdx = -1;
+        if (!data.length) { dd.style.display = 'none'; return; }
+        dd.innerHTML = data.map((r, i) =>
+          `<div class="symbol-result" data-sym="${r.symbol}" data-i="${i}"
+            onmousedown="_pickSymbol('${r.symbol.replace(/'/g,"\\'")}')">
+            <span class="symbol-result-sym">${r.symbol}</span>
+            <span class="symbol-result-name">${r.name}</span>
+            <span class="symbol-result-type">${r.type === 'EQUITY' ? '' : r.type}</span>
+          </div>`).join('');
+        dd.style.display = 'block';
+      } catch {}
+    }, 220);
+  }
+  function _pickSymbol(sym) {
+    document.getElementById('symbol-search-input').value = '';
+    document.getElementById('symbol-dropdown').style.display = 'none';
+    const stocks = getResearch();
+    if (!stocks.includes(sym)) { saveResearch([...stocks, sym]); renderResearchGroup(); }
+  }
+  function _hideSymbolDropdown() {
+    setTimeout(() => { document.getElementById('symbol-dropdown').style.display = 'none'; }, 150);
+  }
+  function _symbolSearchKey(e) {
+    const dd    = document.getElementById('symbol-dropdown');
+    const items = dd.querySelectorAll('.symbol-result');
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); _symIdx = Math.min(_symIdx + 1, items.length - 1); _highlightSym(items); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); _symIdx = Math.max(_symIdx - 1, 0); _highlightSym(items); }
+    else if (e.key === 'Enter' && _symIdx >= 0) { e.preventDefault(); _pickSymbol(items[_symIdx].dataset.sym); }
+    else if (e.key === 'Escape') { dd.style.display = 'none'; }
+  }
+  function _highlightSym(items) {
+    items.forEach((el, i) => el.style.background = i === _symIdx ? 'var(--surface2)' : '');
   }
 
   function addResearchFromInput() {
