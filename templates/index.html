@@ -1656,7 +1656,7 @@
       const dot = `<span style="color:var(--muted)">·</span>`;
       document.getElementById('news-sa-links').innerHTML = [
         ['Yahoo Finance', data.yf_url], ['Stock Analysis', data.sa_url],
-        ['Seeking Alpha', data.sea_url], ['MarketWatch', data.mw_url], ['CNBC', data.cnbc_url],
+        ['Barchart', data.barchart_url], ['MarketWatch', data.mw_url], ['CNBC', data.cnbc_url],
       ].map(([n, u]) => `<a class="news-sa-link" href="${u}" target="_blank" rel="noopener">${n} ↗</a>`).join(dot);
 
       document.getElementById('news-loading').classList.add('hidden');

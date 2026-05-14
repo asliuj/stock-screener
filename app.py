@@ -771,7 +771,7 @@ def api_news(ticker):
     links = {
         "yf_url":  f"https://finance.yahoo.com/quote/{ticker}/news/",
         "sa_url":  f"https://stockanalysis.com/{'etf' if is_etf else 'stocks'}/{sym}/",
-        "sea_url": f"https://seekingalpha.com/symbol/{ticker}/news",
+        "barchart_url": f"https://www.barchart.com/stocks/quotes/{ticker}/news",
         "mw_url":  f"https://www.marketwatch.com/investing/{mw_path}/{sym}",
         "cnbc_url": f"https://www.cnbc.com/quotes/{ticker}",
     }
