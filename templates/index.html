@@ -681,21 +681,10 @@
 
   <!-- Research Stocks panel -->
   <div class="controls-panel">
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-      <label class="etf-group-label" style="color:var(--purple);white-space:nowrap">Research Stocks</label>
-      <input id="research-search-input" type="text" placeholder="Add ticker…"
-        style="flex:1;min-width:0;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);color:var(--text);outline:none"
-        onkeydown="if(event.key==='Enter')addResearchFromInput()"
-        oninput="this.value=this.value.toUpperCase()">
-      <button onclick="addResearchFromInput()"
-        style="padding:4px 10px;font-size:12px;font-weight:600;background:var(--blue);color:#fff;border:none;border-radius:4px;cursor:pointer;white-space:nowrap">
-        + Add
-      </button>
-    </div>
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-      <label class="etf-group-label" style="color:var(--muted);font-size:11px;white-space:nowrap">Search by name</label>
+      <label class="etf-group-label" style="color:var(--purple);white-space:nowrap">Research Stocks</label>
       <div id="symbol-search-wrap">
-        <input id="symbol-search-input" type="text" placeholder="e.g. Nvidia, JPMorgan…" autocomplete="off"
+        <input id="symbol-search-input" type="text" placeholder="Search by ticker or company name…" autocomplete="off"
           oninput="_onSymbolSearch(this.value)" onblur="_hideSymbolDropdown()" onkeydown="_symbolSearchKey(event)">
         <div id="symbol-dropdown"></div>
       </div>
@@ -936,7 +925,6 @@
 
   // ── Research Stocks ───────────────────────────────────────────────
   const RESEARCH_KEY   = 'screener_research_stocks';
-  const RESEARCH_NAMES = { 'DIA': 'Dow Jones Industrial Average', '^DJI': 'Dow Jones Industrial Average (Index)', '^IXIC': 'NASDAQ Composite' };
   let   _researchCache = null;
   const getResearch  = () => _researchCache ??= (() => { try { return JSON.parse(localStorage.getItem(RESEARCH_KEY) || '[]'); } catch { return []; } })();
   const saveResearch = s  => { _researchCache = s; localStorage.setItem(RESEARCH_KEY, JSON.stringify(s)); };
@@ -968,9 +956,10 @@
 
   // ── Symbol search by company name ────────────────────────────────
   let _symTimer = null, _symIdx = -1;
+  const _symDd  = () => document.getElementById('symbol-dropdown');
   function _onSymbolSearch(val) {
     clearTimeout(_symTimer);
-    const dd = document.getElementById('symbol-dropdown');
+    const dd = _symDd();
     if (!val || val.length < 2) { dd.style.display = 'none'; return; }
     _symTimer = setTimeout(async () => {
       try {
@@ -991,15 +980,15 @@
   }
   function _pickSymbol(sym) {
     document.getElementById('symbol-search-input').value = '';
-    document.getElementById('symbol-dropdown').style.display = 'none';
+    _symDd().style.display = 'none';
     const stocks = getResearch();
     if (!stocks.includes(sym)) { saveResearch([...stocks, sym]); renderResearchGroup(); }
   }
   function _hideSymbolDropdown() {
-    setTimeout(() => { document.getElementById('symbol-dropdown').style.display = 'none'; }, 150);
+    setTimeout(() => { _symDd().style.display = 'none'; }, 150);
   }
   function _symbolSearchKey(e) {
-    const dd    = document.getElementById('symbol-dropdown');
+    const dd    = _symDd();
     const items = dd.querySelectorAll('.symbol-result');
     if (!items.length) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); _symIdx = Math.min(_symIdx + 1, items.length - 1); _highlightSym(items); }
@@ -1009,19 +998,6 @@
   }
   function _highlightSym(items) {
     items.forEach((el, i) => el.style.background = i === _symIdx ? 'var(--surface2)' : '');
-  }
-
-  function addResearchFromInput() {
-    const inp = document.getElementById('research-search-input');
-    const ticker = inp.value.trim().toUpperCase();
-    if (!ticker) return;
-    const stocks = getResearch();
-    if (!stocks.includes(ticker)) {
-      saveResearch([...stocks, ticker]);
-      renderResearchGroup();
-    }
-    inp.value = '';
-    inp.focus();
   }
 
   function renderResearchGroup() {
@@ -1205,8 +1181,6 @@
     { id: 'vanguard',  label: 'Vanguard',              etfs: ['vgt','vfh','vht','vde','vis','vcr','vdc','vpu','vnq','vaw','vox'] },
     { id: 'rag',       label: 'RAG — AI & Tech',       etfs: ['chat','igpt','arty','aiq'] },
   ];
-  const GROUP_ORDER = ETF_GROUPS.flatMap(g => g.etfs);
-
   const ETF_NAMES = {
     dia:  'Dow Jones Industrial Average',
     oef:  'S&P 100',
@@ -1260,15 +1234,17 @@
 
   // ── Holdings summary modal ────────────────────────────────────────
 
-  const fmtPct   = v => v != null ? (v >= 0 ? '+' : '') + v.toFixed(2) + '%' : '—';
-  const pctColor = v => v != null ? (v >= 0 ? 'var(--green)' : 'var(--danger)') : 'var(--muted)';
+  const fmtPct    = v => v != null ? (v >= 0 ? '+' : '') + v.toFixed(2) + '%' : '—';
+  const pctColor  = v => v != null ? (v >= 0 ? 'var(--green)' : 'var(--danger)') : 'var(--muted)';
+  const maxWeight = etfs => Math.max(...etfs.map(e => parseFloat(e.weight) || 0));
 
   function showHoldingsModal(data, perf) {
     perf = perf || {};
-    const known   = new Set(Object.keys(data.counts || {}));
+    const known    = new Set(Object.keys(data.counts || {}));
+    const groupOrd = ETF_GROUPS.flatMap(g => g.etfs);
     const etfOrder = [
-      ...GROUP_ORDER.filter(e => known.has(e)),
-      ...Object.keys(data.counts || {}).filter(e => !GROUP_ORDER.includes(e)).sort(),
+      ...groupOrd.filter(e => known.has(e)),
+      ...Object.keys(data.counts || {}).filter(e => !groupOrd.includes(e)).sort(),
     ];
     const tickers = data.tickers || {};
     document.getElementById('modal-subtitle').textContent =
@@ -1505,7 +1481,6 @@
           (map[t] ??= []).push({ etf: etf.toUpperCase(), weight: etfW[t] || 0 });
       }
 
-      const maxWeight = etfs => Math.max(...etfs.map(e => parseFloat(e.weight) || 0));
       _browseCards  = Object.entries(map)
         .map(([ticker, etfs]) => ({ ticker, etfs, name: allNames[ticker] || '' }))
         .sort((a, b) => maxWeight(b.etfs) - maxWeight(a.etfs) || a.ticker.localeCompare(b.ticker));
@@ -1556,14 +1531,19 @@
         const wLabel = w > 0.001 ? `${etf} <span style="opacity:.75">${w.toFixed(2)}%</span>` : etf;
         return `<span class="etf-badge" title="${ETF_NAMES[etf.toLowerCase()] || etf}">${wLabel}</span>`;
       }).join('');
+      const d = _browsePrices && _browsePrices[c.ticker];
+      const priceHtml = d
+        ? (() => { const { arrow, color } = _chg(d.change); return `<span style="color:var(--text);font-weight:600">$${d.price.toFixed(2)}</span>` + (arrow ? ` <span style="color:${color};font-size:11px">${arrow} ${Math.abs(d.pct).toFixed(2)}%</span>` : ''); })()
+        : '…';
+      const maHtml = d ? [d.ma20 && `MA20 $${d.ma20.toFixed(2)}`, d.ma50 && `MA50 $${d.ma50.toFixed(2)}`].filter(Boolean).join('  ·  ') : '';
       return `<div class="browse-card" data-ticker="${c.ticker}">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
           <div class="browse-card-ticker"><a href="${yf(c.ticker)}" target="_blank" rel="noopener">${c.ticker}</a></div>
           <span class="ah-badge" id="ah-${c.ticker}" style="display:none"></span>
-          <div class="browse-price" style="font-size:12px;color:var(--muted);">…</div>
+          <div class="browse-price" style="font-size:12px;color:var(--muted);">${priceHtml}</div>
         </div>
         <div class="browse-card-etfs" style="margin-bottom:4px">${badges}</div>
-        <div class="browse-ma" style="font-size:11px;color:var(--muted);"></div>
+        <div class="browse-ma" style="font-size:11px;color:var(--muted);">${maHtml}</div>
         ${c.name ? `<div style="font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div>` : ''}
         <div class="browse-card-buttons">
           <button class="browse-card-btn" onclick="openNewsModal('${c.ticker}')">📰 News</button>
@@ -1576,29 +1556,10 @@
     }).join('');
   }
 
-  function applyPricesToCards(prices) {
-    document.querySelectorAll('#browse-grid .browse-card').forEach(card => {
-      const d = prices[card.dataset.ticker];
-      const priceEl = card.querySelector('.browse-price');
-      if (priceEl) {
-        if (!d) { priceEl.textContent = '—'; }
-        else {
-          const { arrow, color } = _chg(d.change);
-          priceEl.innerHTML = `<span style="color:var(--text);font-weight:600">$${d.price.toFixed(2)}</span>` +
-            (arrow ? ` <span style="color:${color};font-size:11px">${arrow} ${Math.abs(d.pct).toFixed(2)}%</span>` : '');
-        }
-      }
-      const maEl = card.querySelector('.browse-ma');
-      if (maEl && d)
-        maEl.textContent = [d.ma20 && `MA20 $${d.ma20.toFixed(2)}`, d.ma50 && `MA50 $${d.ma50.toFixed(2)}`].filter(Boolean).join('  ·  ');
-    });
-  }
-
   function filterBrowse(q) {
     const term   = q.trim().toUpperCase();
     const byText = term ? _browseCards.filter(c => c.ticker.includes(term)) : _browseCards;
     renderBrowseCards(_ahFilterOnly ? applyAhFilter(byText) : applyAhFilter(applyPctFilter(byText)));
-    if (_browsePrices) applyPricesToCards(_browsePrices);
     applyAfterHours();
   }
 
@@ -1747,6 +1708,8 @@
     if (n >= 1e6)  return '$' + (n / 1e6).toFixed(2) + 'M';
     return '$' + n.toFixed(0);
   }
+  const fmtShares = n => n != null ? n.toLocaleString() : '—';
+  const fmtVal    = n => n != null ? _fmtLarge(n) : '—';
 
   function _recColor(rec) {
     if (!rec) return 'var(--muted)';
@@ -1858,8 +1821,7 @@
 
       // Insider transactions
       if (data.insider?.length) {
-        const fmtShares = n => n != null ? n.toLocaleString() : '—';
-        const fmtVal    = n => n != null ? '$' + (n >= 1e6 ? (n/1e6).toFixed(2)+'M' : n.toLocaleString()) : '—';
+
         html += `<div class="intel-section"><div class="intel-section-title">🏦 Insider Transactions</div>
           <table class="insider-table">
             <thead><tr><th>Date</th><th>Insider</th><th>Title</th><th>Type</th><th>Shares</th><th>$ Value</th><th>$ Exercise</th></tr></thead>

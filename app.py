@@ -101,7 +101,7 @@ def _normalize_ticker(raw: str) -> str:
             return f"{base}-{suffix}"   # BRK.B → BRK-B
     return t
 
-_VANGUARD_ETFS = {"vgt", "vfh", "vht", "vde", "vis", "vcr", "vdc", "vpu", "vnq", "vaw", "vox"}
+_VANGUARD_ETFS = frozenset(e for e in ALL_ETFS if e.startswith("v"))
 
 _ISHARES_PRODUCTS: dict[str, tuple[str, str]] = {
     "oef":  ("239723", "ishares-sp-100-etf"),
@@ -305,10 +305,8 @@ def fetch_etf_holdings(symbol: str) -> tuple[list[str], dict[str, float], dict[s
     # ── yfinance fallback ─────────────────────────────────────────────
     try:
         tickers = [_normalize_ticker(str(t)) for t in yf.Ticker(symbol).funds_data.top_holdings.index if t]
-        weights = _fetch_stockanalysis(sym_lower)[1]
-        log.info(f"Fetched {len(tickers)} top holdings from {symbol} via yfinance (fallback)"
-                 + (f" + {len(weights)} weights from stockanalysis.com" if weights else ""))
-        return tickers, weights, {}
+        log.info(f"Fetched {len(tickers)} top holdings from {symbol} via yfinance (fallback)")
+        return tickers, {}, {}
     except Exception as e:
         log.warning(f"Could not fetch holdings for {symbol}: {e}")
         return [], {}, {}
@@ -869,7 +867,7 @@ def api_extended(ticker):
         except Exception:
             pass
 
-        # Dividend info
+        # Dividend + analyst consensus (info already fetched above)
         if info:
             rate  = _safe_val(info.get("dividendRate"))
             yld   = _safe_val(info.get("dividendYield"))
@@ -877,7 +875,6 @@ def api_extended(ticker):
             ex_date = None
             if ex_ts:
                 try:
-                    from datetime import datetime, timezone
                     ex_date = datetime.fromtimestamp(ex_ts, tz=timezone.utc).strftime("%Y-%m-%d")
                 except Exception:
                     pass
@@ -888,8 +885,6 @@ def api_extended(ticker):
                     "ex_date":  ex_date,
                 }
 
-        # Analyst consensus — reuse info already fetched above
-        if info:
             rec = (info.get("recommendationKey") or "").replace("_", " ").title() or None
             analyst = {
                 "target_mean": _safe_val(info.get("targetMeanPrice")),
@@ -992,53 +987,7 @@ def api_afterhours():
     return jsonify(result)
 
 
-@app.route("/api/results")
-def api_results():
-    with _lock:
-        return jsonify({"results": _state["results"], "last_run": _state["last_run"],
-                        "count": len(_state["results"])})
-
-
 # ── Entry point ───────────────────────────────────────────────────────────────
-
-def print_holdings_table():
-    with _holdings_lock:
-        snapshot = dict(_holdings)
-
-    all_tickers: list[str] = []
-    rows: list[tuple[str, int, list[str]]] = []
-    for etf in ALL_ETFS:
-        tickers = snapshot.get(etf, [])
-        rows.append((etf.upper(), len(tickers), tickers))
-        all_tickers.extend(tickers)
-
-    col = 80
-    sep = "-" * (col + 16)
-    print("\n" + "=" * (col + 16))
-    print(f"  ETF HOLDINGS SUMMARY  (updated {_holdings_meta['updated']})")
-    print("=" * (col + 16))
-    print(f"  {'ETF':<7} {'Count':>6}   Tickers")
-    print(sep)
-    for etf, count, tickers in rows:
-        words = (", ".join(tickers) if tickers else "(none)").split(", ")
-        lines: list[str] = []
-        line = ""
-        for w in words:
-            candidate = f"{line}, {w}" if line else w
-            if len(candidate) <= col:
-                line = candidate
-            else:
-                lines.append(line)
-                line = w
-        if line:
-            lines.append(line)
-        print(f"  {etf:<7} {count:>6}   {lines[0] if lines else ''}")
-        for extra in lines[1:]:
-            print(f"  {'':>14}{extra}")
-    print(sep)
-    print(f"  {'TOTAL':<7} {len(dict.fromkeys(all_tickers)):>6}   unique tickers across all ETFs")
-    print("=" * (col + 16) + "\n")
-
 
 def _auto_startup():
     """Load cache at startup; refresh in background if cache is missing/stale."""
