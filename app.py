@@ -918,12 +918,30 @@ SOURCE CONTENT:
     return jsonify(result)
 
 
+def _ticker_fallback(sym: str) -> list[dict]:
+    """Validate a single ticker directly when yf.Search is rate-limited."""
+    try:
+        info = yf.Ticker(sym.upper()).fast_info
+        price = getattr(info, "last_price", None)
+        if not price:
+            return []
+        qt = getattr(info, "quote_type", "EQUITY") or "EQUITY"
+        name = ""
+        try:
+            name = yf.Ticker(sym.upper()).info.get("shortName") or ""
+        except Exception:
+            pass
+        return [{"symbol": sym.upper(), "name": name, "type": qt.upper()}]
+    except Exception:
+        return []
+
+
 @app.route("/api/search")
 def api_search():
-    """Search for tickers by company name using yfinance Search."""
     q = request.args.get("q", "").strip()
     if not q or len(q) < 2:
         return jsonify([])
+    # Try yf.Search first; fall back to direct ticker lookup on rate-limit
     try:
         results = yf.Search(q).quotes
         out = []
@@ -940,8 +958,8 @@ def api_search():
                 break
         return jsonify(out)
     except Exception as e:
-        log.warning(f"Symbol search failed: {e}")
-        return jsonify([])
+        log.warning(f"Symbol search failed ({e}); trying direct ticker lookup")
+        return jsonify(_ticker_fallback(q))
 
 
 @app.route("/api/extended/<path:ticker>")

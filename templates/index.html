@@ -1037,7 +1037,12 @@
         const res  = await fetch('/api/search?q=' + encodeURIComponent(val));
         const data = await res.json();
         _symIdx = -1;
-        if (!data.length) { dd.style.display = 'none'; return; }
+        if (!data.length) {
+          dd.innerHTML = `<div class="symbol-result" style="color:var(--muted);cursor:default">
+            No results — press Enter to add <strong>${val.toUpperCase()}</strong> directly</div>`;
+          dd.style.display = 'block';
+          return;
+        }
         dd.innerHTML = data.map((r, i) =>
           `<div class="symbol-result" data-sym="${r.symbol}" data-i="${i}"
             onmousedown="_pickSymbol('${r.symbol.replace(/'/g,"\\'")}')">
@@ -1064,7 +1069,11 @@
     if (!items.length) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); _symIdx = Math.min(_symIdx + 1, items.length - 1); _highlightSym(items); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); _symIdx = Math.max(_symIdx - 1, 0); _highlightSym(items); }
-    else if (e.key === 'Enter' && _symIdx >= 0) { e.preventDefault(); _pickSymbol(items[_symIdx].dataset.sym); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (_symIdx >= 0 && items[_symIdx].dataset.sym) _pickSymbol(items[_symIdx].dataset.sym);
+      else { const inp = document.getElementById('symbol-search-input'); if (inp.value.trim()) _pickSymbol(inp.value.trim().toUpperCase()); }
+    }
     else if (e.key === 'Escape') { dd.style.display = 'none'; }
   }
   function _highlightSym(items) {
