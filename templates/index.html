@@ -578,6 +578,65 @@
       font-size: 13px;
     }
     .news-sa-link:hover { text-decoration: underline; }
+    #news-summary-section {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface2);
+      margin: 10px 0 6px;
+      padding: 10px 14px 12px;
+    }
+    #news-summary-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .summary-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .summary-meta {
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .summary-regen {
+      font-size: 11px;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 7px;
+      cursor: pointer;
+      color: var(--blue);
+    }
+    .summary-regen:hover { background: var(--surface); }
+    .summary-bullets {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .summary-bullets li {
+      font-size: 12.5px;
+      line-height: 1.45;
+      color: var(--text);
+      padding-left: 14px;
+      position: relative;
+    }
+    .summary-bullets li::before {
+      content: '•';
+      position: absolute;
+      left: 0;
+      color: var(--blue);
+      font-weight: 700;
+    }
 
     /* ── Market Intel modal ─────────────────────────────────────────── */
     .intel-section { padding: 14px 0; border-bottom: 1px solid var(--border); }
@@ -848,6 +907,18 @@
     </div>
     <div class="modal-body" id="news-modal-body" style="padding:0 24px 8px">
       <div id="news-price-bar" class="news-price-bar hidden"></div>
+      <div id="news-summary-section" class="hidden">
+        <div id="news-summary-header">
+          <span class="summary-title">📋 Financial Summary</span>
+          <div class="summary-meta">
+            <span id="summary-sources"></span>
+            <span id="summary-timing"></span>
+            <button class="summary-regen" id="summary-regen-btn" onclick="_regenSummary()" style="display:none">↻ Regenerate</button>
+          </div>
+        </div>
+        <div id="summary-loading" style="font-size:12px;color:var(--muted);padding:4px 0;">Generating summary…</div>
+        <ul id="summary-bullets" class="summary-bullets" style="display:none"></ul>
+      </div>
       <div id="news-loading" style="padding:24px 0;text-align:center;color:var(--muted);">Loading…</div>
       <ul id="news-list" class="news-list hidden"></ul>
       <div id="news-empty" class="hidden" style="padding:24px 0;text-align:center;color:var(--muted);">No recent news found.</div>
@@ -1630,29 +1701,41 @@
 
 
   // ── News modal ────────────────────────────────────────────────────
+  let _summaryTicker = null;
+
   async function openNewsModal(ticker) {
+    _summaryTicker = ticker;
     document.getElementById('news-modal-title').textContent = `📰 ${ticker}`;
     document.getElementById('news-price-bar').classList.add('hidden');
     document.getElementById('news-loading').classList.remove('hidden');
     document.getElementById('news-list').classList.add('hidden');
     document.getElementById('news-empty').classList.add('hidden');
     document.getElementById('news-sa-links').innerHTML = '';
+    // Reset summary panel
+    document.getElementById('news-summary-section').classList.add('hidden');
+    document.getElementById('summary-loading').style.display = 'block';
+    document.getElementById('summary-bullets').style.display = 'none';
+    document.getElementById('summary-sources').textContent = '';
+    document.getElementById('summary-timing').textContent = '';
+    document.getElementById('summary-regen-btn').style.display = 'none';
     document.getElementById('news-modal').classList.remove('hidden');
 
+    // Kick off all 3 fetches in parallel — summary is independent
+    const t0 = Date.now();
+    const [newsRes, priceRes] = await Promise.all([
+      fetch(`/api/news/${encodeURIComponent(ticker)}`),
+      fetch('/api/prices', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ tickers: [ticker] }) }),
+    ]);
+    _fetchSummary(ticker, t0);   // fire-and-forget
+
     try {
-      const [newsRes, priceRes] = await Promise.all([
-        fetch(`/api/news/${encodeURIComponent(ticker)}`),
-        fetch('/api/prices', { method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ tickers: [ticker] }) }),
-      ]);
       const data   = await newsRes.json();
       const prices = await priceRes.json();
 
-      // Price bar
       const d = prices[ticker];
       if (d) _renderPriceBar(document.getElementById('news-price-bar'), d);
 
-      // External links
       const dot = `<span style="color:var(--muted)">·</span>`;
       document.getElementById('news-sa-links').innerHTML = [
         ['Yahoo Finance', data.yf_url], ['Stock Analysis', data.sa_url],
@@ -1683,7 +1766,46 @@
     }
   }
 
-  function closeNewsModal() { closeModal('news-modal'); }
+  async function _fetchSummary(ticker, t0, bust = false) {
+    document.getElementById('news-summary-section').classList.remove('hidden');
+    try {
+      const url  = `/api/news-summary/${encodeURIComponent(ticker)}` + (bust ? '?bust=1' : '');
+      const res  = await fetch(url);
+      const data = await res.json();
+      if (ticker !== _summaryTicker) return;  // modal was reopened for different ticker
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      const bullets = data.bullets || [];
+      if (bullets.length) {
+        document.getElementById('summary-bullets').innerHTML = bullets.map(b => `<li>${b}</li>`).join('');
+        document.getElementById('summary-bullets').style.display = 'flex';
+      }
+      document.getElementById('summary-loading').style.display = 'none';
+      document.getElementById('summary-sources').textContent =
+        (data.sources || []).map(s => s.split(' ')[0]).join(' · ');
+      document.getElementById('summary-timing').textContent = `⏱ ${elapsed}s`;
+      document.getElementById('summary-regen-btn').style.display = '';
+    } catch {
+      if (ticker !== _summaryTicker) return;
+      document.getElementById('summary-loading').textContent = 'Summary unavailable.';
+    }
+  }
+
+  async function _regenSummary() {
+    const ticker = _summaryTicker;
+    if (!ticker) return;
+    document.getElementById('summary-bullets').style.display = 'none';
+    document.getElementById('summary-loading').style.display = 'block';
+    document.getElementById('summary-loading').textContent = 'Regenerating…';
+    document.getElementById('summary-sources').textContent = '';
+    document.getElementById('summary-timing').textContent = '';
+    document.getElementById('summary-regen-btn').style.display = 'none';
+    _fetchSummary(ticker, Date.now(), true);
+  }
+
+  function closeNewsModal() {
+    _summaryTicker = null;
+    closeModal('news-modal');
+  }
 
 
   // ── Market Intel modal ────────────────────────────────────────────

@@ -71,6 +71,9 @@ _lock = threading.Lock()
 _perf_state: dict = {"cache": {}, "ts": 0.0}
 _perf_lock = threading.Lock()
 
+_news_summary_cache: dict[str, dict] = {}
+_NEWS_SUMMARY_TTL = 1800  # 30 minutes
+
 _holdings: dict[str, list[str]] = {}
 _weights:  dict[str, dict[str, float]] = {}
 _names:    dict[str, str] = {}
@@ -776,6 +779,141 @@ def api_news(ticker):
         "cnbc_url": f"https://www.cnbc.com/quotes/{ticker}",
     }
     return jsonify({"news": articles, **links})
+
+
+# ── News summary (AI) ─────────────────────────────────────────────────────────
+
+_SCRAPE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+
+
+def _scrape_text(url: str, max_chars: int = 3000) -> str:
+    try:
+        from bs4 import BeautifulSoup
+        r = requests.get(url, headers=_SCRAPE_HEADERS, timeout=8)
+        if r.status_code != 200:
+            return ""
+        soup = BeautifulSoup(r.text, "lxml")
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+            tag.decompose()
+        return " ".join(soup.get_text(separator=" ").split())[:max_chars]
+    except Exception:
+        return ""
+
+
+def _scrape_stockanalysis_news(sym_lower: str) -> str:
+    try:
+        url = f"https://stockanalysis.com/stocks/{sym_lower}/news/__data.json"
+        r = requests.get(url, headers=_SCRAPE_HEADERS, timeout=8)
+        if r.status_code != 200:
+            return ""
+        texts: list[str] = []
+        def _walk(obj: object, depth: int = 0) -> None:
+            if depth > 6:
+                return
+            if isinstance(obj, str) and len(obj) > 30:
+                texts.append(obj)
+            elif isinstance(obj, list):
+                for item in obj:
+                    _walk(item, depth + 1)
+            elif isinstance(obj, dict):
+                for v in obj.values():
+                    _walk(v, depth + 1)
+        _walk(r.json())
+        fin_kw = {"earn", "revenue", "eps", "quarter", "billion", "million",
+                  "analyst", "target", "guidance", "margin", "profit", "loss",
+                  "beat", "miss", "raised", "upgraded", "downgraded"}
+        relevant = [t for t in texts if any(k in t.lower() for k in fin_kw)]
+        return " | ".join((relevant or texts)[:40])[:3000]
+    except Exception:
+        return ""
+
+
+@app.route("/api/news-summary/<path:ticker>")
+def api_news_summary(ticker: str):
+    ticker = ticker.upper()
+
+    if request.args.get("bust"):
+        _news_summary_cache.pop(ticker, None)
+    cached = _news_summary_cache.get(ticker)
+    if cached and (time.time() - cached["ts"]) < _NEWS_SUMMARY_TTL:
+        return jsonify(cached["data"])
+
+    is_etf  = ticker.lower() in _ALL_ETFS_SET
+    sym     = ticker.lower().replace(".", "-")
+    mw_path = "fund" if is_etf else "stock"
+
+    # ── Gather content from all 5 sources in parallel ─────────────────
+    content: dict[str, str] = {}
+
+    def _yf_news() -> tuple[str, str]:
+        lines: list[str] = []
+        for a in (yf.Ticker(ticker).news or [])[:20]:
+            c    = a.get("content") or {}
+            title = c.get("title") or a.get("title", "")
+            pub   = (c.get("provider") or {}).get("displayName") or a.get("publisher", "")
+            ts    = a.get("providerPublishTime")
+            date  = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%b %d") if ts else ""
+            if title:
+                lines.append(f"{date} [{pub}] {title}")
+        return "Yahoo Finance", "\n".join(lines)
+
+    def _sa_news()  -> tuple[str, str]: return "Stock Analysis", _scrape_stockanalysis_news(sym)
+    def _bc_news()  -> tuple[str, str]: return "Barchart",       _scrape_text(f"https://www.barchart.com/stocks/quotes/{ticker}/news")
+    def _mw_news()  -> tuple[str, str]: return "MarketWatch",    _scrape_text(f"https://www.marketwatch.com/investing/{mw_path}/{sym}")
+    def _cnbc_news()-> tuple[str, str]: return "CNBC",           _scrape_text(f"https://www.cnbc.com/quotes/{ticker}")
+
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        for fut in as_completed([ex.submit(f) for f in (_yf_news, _sa_news, _bc_news, _mw_news, _cnbc_news)]):
+            try:
+                name, text = fut.result()
+                if text:
+                    content[name] = text
+            except Exception:
+                pass
+
+    if not content:
+        return jsonify({"bullets": ["No news content available."], "sources": []})
+
+    sources_used = list(content.keys())
+    body = "\n\n".join(f"=== {name} ===\n{text}" for name, text in content.items())
+
+    prompt = f"""You are a Wall Street analyst writing a concise financial briefing for {ticker}.
+
+Using ONLY the source content below, write exactly 10 bullet points. Cover this mix:
+- 2–3 bullets: KEY EARNINGS LINE ITEMS — EPS (actual vs estimate, beat/miss), revenue by segment, gross margin, operating income, free cash flow. Use the specific numbers from the text.
+- 2 bullets: GUIDANCE vs Street consensus — next quarter revenue/EPS guidance vs analyst estimates.
+- 1–2 bullets: STOCK/VALUATION COMMENTARY — what the current price implies (forward P/E, EV/Sales, growth-adjusted multiple, what the market is pricing in).
+- 2 bullets: ANALYST ACTIONS — specific firm names, rating changes, price target moves with numbers.
+- 1 bullet: KEY RISK or overhang — with a dollar figure or % impact if available.
+
+Rules: Be specific with numbers. Each bullet 1–2 sentences, under 180 chars. No fluff. Start each bullet with •. If a category has no data in the sources, still write the most relevant bullet you can from what's available.
+
+SOURCE CONTENT:
+{body}"""
+
+    try:
+        import anthropic as _ant
+        msg = _ant.Anthropic().messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text
+        bullets = [ln.lstrip("•·*- ").strip() for ln in raw.splitlines() if ln.strip() and ln.strip()[0] in "•·*-"]
+        if not bullets:
+            bullets = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        bullets = bullets[:10]
+    except Exception as e:
+        log.error(f"AI summary failed for {ticker}: {e}")
+        return jsonify({"error": str(e), "bullets": [], "sources": []})
+
+    result = {"bullets": bullets, "sources": sources_used}
+    _news_summary_cache[ticker] = {"data": result, "ts": time.time()}
+    return jsonify(result)
 
 
 @app.route("/api/search")
