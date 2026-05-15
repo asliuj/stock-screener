@@ -10,6 +10,8 @@ Runs on port 8080.
 
 import os
 import re
+from dotenv import load_dotenv
+load_dotenv()
 import json
 import time
 import logging

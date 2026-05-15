@@ -1775,18 +1775,28 @@
       if (ticker !== _summaryTicker) return;  // modal was reopened for different ticker
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
       const bullets = data.bullets || [];
-      if (bullets.length) {
+      const loadEl  = document.getElementById('summary-loading');
+      if (data.error) {
+        loadEl.style.display = 'block';
+        loadEl.style.color   = 'var(--danger)';
+        loadEl.textContent   = `Error: ${data.error}`;
+      } else if (bullets.length) {
         document.getElementById('summary-bullets').innerHTML = bullets.map(b => `<li>${b}</li>`).join('');
         document.getElementById('summary-bullets').style.display = 'flex';
+        loadEl.style.display = 'none';
+      } else {
+        loadEl.style.display = 'block';
+        loadEl.textContent   = 'No summary data returned.';
       }
-      document.getElementById('summary-loading').style.display = 'none';
       document.getElementById('summary-sources').textContent =
         (data.sources || []).map(s => s.split(' ')[0]).join(' · ');
       document.getElementById('summary-timing').textContent = `⏱ ${elapsed}s`;
       document.getElementById('summary-regen-btn').style.display = '';
     } catch {
       if (ticker !== _summaryTicker) return;
-      document.getElementById('summary-loading').textContent = 'Summary unavailable.';
+      const loadEl = document.getElementById('summary-loading');
+      loadEl.style.display = 'block';
+      loadEl.textContent   = 'Summary unavailable — check server logs.';
     }
   }
 
@@ -1794,8 +1804,10 @@
     const ticker = _summaryTicker;
     if (!ticker) return;
     document.getElementById('summary-bullets').style.display = 'none';
-    document.getElementById('summary-loading').style.display = 'block';
-    document.getElementById('summary-loading').textContent = 'Regenerating…';
+    const regenLoadEl = document.getElementById('summary-loading');
+    regenLoadEl.style.display = 'block';
+    regenLoadEl.style.color   = 'var(--muted)';
+    regenLoadEl.textContent   = 'Regenerating…';
     document.getElementById('summary-sources').textContent = '';
     document.getElementById('summary-timing').textContent = '';
     document.getElementById('summary-regen-btn').style.display = 'none';
