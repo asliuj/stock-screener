@@ -200,6 +200,13 @@ def fetch_etf_holdings(symbol: str) -> tuple[list[str], dict[str, float], dict[s
     """Fetch ETF constituent tickers, weights, and names via priority pipeline.
     Returns (tickers, {ticker: weight_pct}, {ticker: name})."""
     sym_lower = symbol.lower()
+    _sa_cache: list = []  # lazily populated; avoids calling _fetch_stockanalysis more than once
+
+    def _sa_weights() -> dict[str, float]:
+        nonlocal _sa_cache
+        if not _sa_cache:
+            _sa_cache = list(_fetch_stockanalysis(sym_lower))
+        return _sa_cache[1]
 
     # ── SSGA/SPDR ────────────────────────────────────────────────────
     try:
@@ -213,7 +220,7 @@ def fetch_etf_holdings(symbol: str) -> tuple[list[str], dict[str, float], dict[s
                 tickers, weights, names = _parse_df_holdings(df, "Ticker")
                 if tickers:
                     if not weights:
-                        weights = _fetch_stockanalysis(sym_lower)[1]
+                        weights = _sa_weights()
                     log.info(f"Fetched {len(tickers)} holdings from {symbol} via SSGA")
                     return tickers, _norm_weights(weights), names
     except Exception as e:
@@ -236,7 +243,7 @@ def fetch_etf_holdings(symbol: str) -> tuple[list[str], dict[str, float], dict[s
                         tickers, weights, names = _parse_df_holdings(df, tcol)
                         if tickers:
                             if not weights:
-                                weights = _fetch_stockanalysis(sym_lower)[1]
+                                weights = _sa_weights()
                             log.info(f"Fetched {len(tickers)} holdings from {symbol} via iShares")
                             return tickers, _norm_weights(weights), names
         except Exception as e:
@@ -262,7 +269,7 @@ def fetch_etf_holdings(symbol: str) -> tuple[list[str], dict[str, float], dict[s
                             names[nt] = n
                 if tickers:
                     if not weights:
-                        weights = _fetch_stockanalysis(sym_lower)[1]
+                        weights = _sa_weights()
                     log.info(f"Fetched {len(tickers)} holdings from {symbol} via Vanguard")
                     return tickers, _norm_weights(weights), names
         except Exception as e:
@@ -300,7 +307,9 @@ def fetch_etf_holdings(symbol: str) -> tuple[list[str], dict[str, float], dict[s
 
     # ── stockanalysis.com (top ~25 with weights, free tier) ──────────
     try:
-        tickers, weights = _fetch_stockanalysis(sym_lower)
+        if not _sa_cache:
+            _sa_cache[:] = list(_fetch_stockanalysis(sym_lower))
+        tickers, weights = _sa_cache[0], _sa_cache[1]
         if tickers:
             log.info(f"Fetched {len(tickers)} holdings from {symbol} via stockanalysis.com")
             return tickers, weights, {}
@@ -848,10 +857,13 @@ def api_news_summary(ticker: str):
     sym     = ticker.lower().replace(".", "-")
     mw_path = "fund" if is_etf else "stock"
 
-    # ── Live financial data from yfinance ──────────────────────────────
+    # ── Fetch yf.Ticker once — reused for both live data and news ────────
+    _tkr = yf.Ticker(ticker)
+
+    # ── Live financial data ───────────────────────────────────────────
     live: dict[str, str] = {}
     try:
-        info = yf.Ticker(ticker).info
+        info = _tkr.info
         def _pct(v):  return f"{v * 100:.1f}%" if v is not None else None
         def _mul(v):  return f"{v:.1f}×"       if v is not None else None
         def _usd(v):  return f"${v:.2f}"        if v is not None else None
@@ -883,7 +895,7 @@ def api_news_summary(ticker: str):
 
     def _yf_news() -> tuple[str, str]:
         lines: list[str] = []
-        for a in (yf.Ticker(ticker).news or [])[:20]:
+        for a in (_tkr.news or [])[:20]:
             c     = a.get("content") or {}
             title = c.get("title") or a.get("title", "")
             pub   = (c.get("provider") or {}).get("displayName") or a.get("publisher", "")
@@ -1164,7 +1176,6 @@ def api_afterhours():
         return jsonify({})
 
     result = {}
-    lvl0 = lambda df: df.columns.get_level_values(0)
     for i in range(0, len(tickers), BATCH_SIZE):
         batch = tickers[i:i + BATCH_SIZE]
         try:
@@ -1172,9 +1183,11 @@ def api_afterhours():
                 fut_ext = pool.submit(_yf_download, batch, period="1d", interval="5m", prepost=True)
                 fut_reg = pool.submit(_yf_download, batch, period="5d", interval="1d")
                 ext, reg = fut_ext.result(), fut_reg.result()
+            ext_cols = set(ext.columns.get_level_values(0))
+            reg_cols = set(reg.columns.get_level_values(0))
             for t in batch:
                 try:
-                    if t not in lvl0(ext) or t not in lvl0(reg): continue
+                    if t not in ext_cols or t not in reg_cols: continue
                     ext_c = ext[t]["Close"].dropna()
                     reg_c = reg[t]["Close"].dropna()
                     if ext_c.empty or reg_c.empty: continue

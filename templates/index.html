@@ -983,8 +983,15 @@
   let pollTimer      = null;
   let _intelTicker   = null;
   let isRunning      = false;
+  let _etfCountMap = null;     // Map<etf, element> built once after checkboxes render
   let _holdingsCache = null;   // cached /api/holdings/data payload — refreshed on fresh_fetch
   let _perfCache     = null;   // cached /api/etf-performance payload — 5-min TTL server-side
+
+  // Cached result-panel element refs — looked up once, reused on every render
+  const _elEmpty  = document.getElementById('empty-state');
+  const _elTable  = document.getElementById('results-table');
+  const _elTbody  = document.getElementById('results-body');
+  const _elCount  = document.getElementById('result-count');
 
   const _debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
   const _filterBrowseDebounced = _debounce(q => filterBrowse(q), 180);
@@ -1215,10 +1222,10 @@
 
   // ── Render results table ──────────────────────────────────────────
   function renderResults(results) {
-    const empty = document.getElementById('empty-state');
-    const tbl   = document.getElementById('results-table');
-    const tbody = document.getElementById('results-body');
-    const cnt   = document.getElementById('result-count');
+    const empty = _elEmpty;
+    const tbl   = _elTable;
+    const tbody = _elTbody;
+    const cnt   = _elCount;
 
     empty.style.display = 'none';
     tbl.style.display   = 'table';
@@ -1263,16 +1270,13 @@
   // ── View Holdings button ──────────────────────────────────────────
   async function openHoldingsReport() {
     try {
-      const [sRes, dRes, pRes] = await Promise.all([
-        fetch('/api/holdings'),
-        fetch('/api/holdings/data'),
-        fetch('/api/etf-performance'),
-      ]);
-      const status  = await sRes.json();
-      const data    = await dRes.json();
-      const perf    = await pRes.json();
-      _perfCache = perf;
-      showHoldingsModal({ ...status, ...data }, perf);
+      const fetches = [fetch('/api/holdings'), fetch('/api/holdings/data')];
+      if (!_perfCache) fetches.push(fetch('/api/etf-performance'));
+      const results = await Promise.all(fetches);
+      const status  = await results[0].json();
+      const data    = await results[1].json();
+      if (!_perfCache) _perfCache = await results[2].json();
+      showHoldingsModal({ ...status, ...data }, _perfCache);
     } catch(e) {
       alert('Could not load holdings: ' + e.message);
     }
@@ -1402,8 +1406,13 @@
     holdingsReady = data.status === 'ready';
     document.getElementById('run-btn').disabled = !holdingsReady || isRunning;
     const counts = data.counts || {};
+    if (!_etfCountMap) {
+      _etfCountMap = new Map();
+      document.querySelectorAll('[id^="etf-count-"]').forEach(el =>
+        _etfCountMap.set(el.id.slice('etf-count-'.length), el));
+    }
     Object.entries(counts).forEach(([etf, n]) => {
-      const el = document.getElementById(`etf-count-${etf}`);
+      const el = _etfCountMap.get(etf);
       if (el) el.textContent = n;
     });
   }
