@@ -848,13 +848,43 @@ def api_news_summary(ticker: str):
     sym     = ticker.lower().replace(".", "-")
     mw_path = "fund" if is_etf else "stock"
 
-    # ── Gather content from all 5 sources in parallel ─────────────────
+    # ── Live financial data from yfinance ──────────────────────────────
+    live: dict[str, str] = {}
+    try:
+        info = yf.Ticker(ticker).info
+        def _pct(v):  return f"{v * 100:.1f}%" if v is not None else None
+        def _mul(v):  return f"{v:.1f}×"       if v is not None else None
+        def _usd(v):  return f"${v:.2f}"        if v is not None else None
+        def _num(v):  return f"{v:,.0f}"        if v is not None else None
+        fcf = info.get("freeCashflow")
+        rev = info.get("totalRevenue")
+        raw_live = {
+            "grossMargin":     _pct(info.get("grossMargins")),
+            "operatingMargin": _pct(info.get("operatingMargins")),
+            "netMargin":       _pct(info.get("profitMargins")),
+            "fcfMargin":       _pct(fcf / rev if fcf and rev else None),
+            "epsTTM":          _usd(info.get("trailingEps")),
+            "epsForward":      _usd(info.get("forwardEps")),
+            "bookValue":       _usd(info.get("bookValue")),
+            "priceToBook":     _mul(info.get("priceToBook")),
+            "evEbitda":        _mul(info.get("enterpriseToEbitda")),
+            "evRevenue":       _mul(info.get("enterpriseToRevenue")),
+            "peTrailing":      _mul(info.get("trailingPE")),
+            "peForward":       _mul(info.get("forwardPE")),
+            "peg":             f"{info.get('pegRatio'):.2f}" if info.get("pegRatio") else None,
+            "employees":       _num(info.get("fullTimeEmployees")),
+        }
+        live = {k: v for k, v in raw_live.items() if v is not None}
+    except Exception as e:
+        log.debug(f"Live data fetch failed for {ticker}: {e}")
+
+    # ── Scrape content from 5 sources in parallel ──────────────────────
     content: dict[str, str] = {}
 
     def _yf_news() -> tuple[str, str]:
         lines: list[str] = []
         for a in (yf.Ticker(ticker).news or [])[:20]:
-            c    = a.get("content") or {}
+            c     = a.get("content") or {}
             title = c.get("title") or a.get("title", "")
             pub   = (c.get("provider") or {}).get("displayName") or a.get("publisher", "")
             ts    = a.get("providerPublishTime")
@@ -863,10 +893,10 @@ def api_news_summary(ticker: str):
                 lines.append(f"{date} [{pub}] {title}")
         return "Yahoo Finance", "\n".join(lines)
 
-    def _sa_news()  -> tuple[str, str]: return "Stock Analysis", _scrape_stockanalysis_news(sym)
-    def _bc_news()  -> tuple[str, str]: return "Barchart",       _scrape_text(f"https://www.barchart.com/stocks/quotes/{ticker}/news")
-    def _mw_news()  -> tuple[str, str]: return "MarketWatch",    _scrape_text(f"https://www.marketwatch.com/investing/{mw_path}/{sym}")
-    def _cnbc_news()-> tuple[str, str]: return "CNBC",           _scrape_text(f"https://www.cnbc.com/quotes/{ticker}")
+    def _sa_news()   -> tuple[str, str]: return "Stock Analysis", _scrape_stockanalysis_news(sym)
+    def _bc_news()   -> tuple[str, str]: return "Barchart",  _scrape_text(f"https://www.barchart.com/stocks/quotes/{ticker}/news")
+    def _mw_news()   -> tuple[str, str]: return "MarketWatch", _scrape_text(f"https://www.marketwatch.com/investing/{mw_path}/{sym}")
+    def _cnbc_news() -> tuple[str, str]: return "CNBC",      _scrape_text(f"https://www.cnbc.com/quotes/{ticker}")
 
     with ThreadPoolExecutor(max_workers=5) as ex:
         for fut in as_completed([ex.submit(f) for f in (_yf_news, _sa_news, _bc_news, _mw_news, _cnbc_news)]):
@@ -877,43 +907,65 @@ def api_news_summary(ticker: str):
             except Exception:
                 pass
 
-    if not content:
-        return jsonify({"bullets": ["No news content available."], "sources": []})
-
     sources_used = list(content.keys())
-    body = "\n\n".join(f"=== {name} ===\n{text}" for name, text in content.items())
+    body = "\n\n".join(f"=== {name} ===\n{text}" for name, text in content.items()) or "(no scraped content)"
+    live_ctx = "\n".join(f"  {k}: {v}" for k, v in live.items()) if live else "  (not available)"
 
-    prompt = f"""You are a Wall Street analyst writing a concise financial briefing for {ticker}.
+    prompt = f"""You are a Wall Street equity research analyst. Write a structured deep-dive brief for {ticker}.
 
-Using ONLY the source content below, write exactly 10 bullet points. Cover this mix:
-- 2–3 bullets: KEY EARNINGS LINE ITEMS — EPS (actual vs estimate, beat/miss), revenue by segment, gross margin, operating income, free cash flow. Use the specific numbers from the text.
-- 2 bullets: GUIDANCE vs Street consensus — next quarter revenue/EPS guidance vs analyst estimates.
-- 1–2 bullets: STOCK/VALUATION COMMENTARY — what the current price implies (forward P/E, EV/Sales, growth-adjusted multiple, what the market is pricing in).
-- 2 bullets: ANALYST ACTIONS — specific firm names, rating changes, price target moves with numbers.
-- 1 bullet: KEY RISK or overhang — with a dollar figure or % impact if available.
-
-Rules: Be specific with numbers. Each bullet 1–2 sentences, under 180 chars. No fluff. Start each bullet with •. If a category has no data in the sources, still write the most relevant bullet you can from what's available.
+LIVE FINANCIAL DATA (incorporate these exact numbers where relevant):
+{live_ctx}
 
 SOURCE CONTENT:
-{body}"""
+{body}
+
+Write exactly 7 sections with 2–4 dense, data-rich bullets each. Use specific numbers throughout. Reference the live financial data above in the margins and valuation sections.
+
+Respond using ONLY these XML tags, in this exact order:
+
+<section name="pnl">
+• [P&L / balance sheet anomalies: revenue concentration, working capital flags, ROIC, buybacks vs SBC]
+</section>
+<section name="growth">
+• [Future growth: product ramp, new markets, pipeline, TAM expansion]
+</section>
+<section name="earnings">
+• [Earnings surprises: EPS beat/miss with actuals vs estimates, guidance vs consensus]
+</section>
+<section name="headcount">
+• [Headcount & org: employee count, revenue/employee, key hires/departures, restructuring]
+</section>
+<section name="ai">
+• [AI adoption: AI product traction, customer adoption, competitive moat, inference vs training]
+</section>
+<section name="margins">
+• [Margin analysis using live data: gross/operating/net/FCF margins, trend, vs sector, commentary on drivers]
+</section>
+<section name="valuation">
+• [Valuation using live data: EPS TTM/forward, book value, EV/EBITDA, EV/Revenue, P/E, PEG — what multiples imply about growth expectations]
+</section>
+
+Rules: Each bullet 1–2 sentences max. Under 200 chars per bullet. No fluff. No intro or outro text."""
 
     try:
         import anthropic as _ant
         msg = _ant.Anthropic().messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=1400,
+            max_tokens=2200,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = msg.content[0].text
-        bullets = [ln.lstrip("•·*- ").strip() for ln in raw.splitlines() if ln.strip() and ln.strip()[0] in "•·*-"]
-        if not bullets:
-            bullets = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-        bullets = bullets[:10]
+        sections: dict[str, list[str]] = {}
+        for sec_name, sec_body in re.findall(r'<section name="(\w+)">(.*?)</section>', raw, re.DOTALL):
+            bullets = [ln.lstrip("•·*- ").strip() for ln in sec_body.splitlines()
+                       if ln.strip() and ln.strip()[0] in "•·*-"]
+            if bullets:
+                sections[sec_name] = bullets
     except Exception as e:
         log.error(f"AI summary failed for {ticker}: {e}")
-        return jsonify({"error": str(e), "bullets": [], "sources": []})
+        return jsonify({"error": str(e), "sections": {}, "live": live, "sources": sources_used})
 
-    result = {"bullets": bullets, "sources": sources_used}
+    result = {"sections": sections, "live": live, "sources": sources_used}
     _news_summary_cache[ticker] = {"data": result, "ts": time.time()}
     return jsonify(result)
 
