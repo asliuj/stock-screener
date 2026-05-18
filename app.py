@@ -12,7 +12,6 @@ import os
 import re
 from dotenv import load_dotenv
 load_dotenv()
-_ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 import json
 import time
 import logging
@@ -962,7 +961,7 @@ Rules: Each bullet 1–2 sentences max. Under 200 chars per bullet. No fluff. No
 
     try:
         import anthropic as _ant
-        msg = _ant.Anthropic(api_key=_ANTHROPIC_KEY).messages.create(
+        msg = _ant.Anthropic().messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=2200,
             messages=[{"role": "user", "content": prompt}],
