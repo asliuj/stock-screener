@@ -60,8 +60,6 @@ ALL_ETFS = [
     "vgt", "vfh", "vht", "vde", "vis", "vcr", "vdc", "vpu", "vnq", "vaw", "vox",
     # RAG (AI/Tech)
     "chat", "igpt", "arty", "aiq",
-    # Memory Chip
-    "stx", "wdc", "sndk", "mu",
 ]
 HOLDINGS_CACHE_FILE = os.path.join(os.path.dirname(__file__), "holdings_cache.json")
 _ALL_ETFS_SET = frozenset(ALL_ETFS)   # O(1) membership test
