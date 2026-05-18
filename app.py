@@ -1002,6 +1002,11 @@ def _ticker_fallback(sym: str) -> list[dict]:
         return []
 
 
+@app.route("/api/check-key")
+def api_check_key():
+    return jsonify({"key_set": bool(_ANTHROPIC_KEY), "key_len": len(_ANTHROPIC_KEY)})
+
+
 @app.route("/api/search")
 def api_search():
     q = request.args.get("q", "").strip()
