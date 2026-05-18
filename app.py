@@ -30,6 +30,7 @@ from ta.momentum import RSIIndicator
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
+log.info(f"ANTHROPIC_API_KEY loaded: {bool(_ANTHROPIC_KEY)} (len={len(_ANTHROPIC_KEY)})")
 
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
