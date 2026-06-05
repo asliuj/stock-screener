@@ -729,7 +729,7 @@ def _fetch_etf_performance() -> dict:
             result[etf].update({
                 "price": round(current, 2),
                 "ytd":   round((current - first) / first * 100, 2),
-                "daily": round((current - prev)  / prev  * 100, 2) if prev else None,
+                "daily": round((current - prev) / current * 100, 2) if current else None,
             })
         except Exception:
             pass
@@ -787,7 +787,7 @@ def api_prices():
             prices[ticker] = {
                 "price":  round(current, 2),
                 "change": round(current - prev, 2),
-                "pct":    round((current - prev) / prev * 100, 2) if prev else 0,
+                "pct":    round((current - prev) / current * 100, 2) if current else 0,
                 "ma20":   round(float(closes.iloc[-20:].mean()), 2) if len(closes) >= 20 else None,
                 "ma50":   round(float(closes.iloc[-50:].mean()), 2) if len(closes) >= 50 else None,
             }
