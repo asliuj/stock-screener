@@ -682,19 +682,29 @@ def api_holdings_data():
         return jsonify({"tickers": dict(_holdings), "weights": dict(_weights), "names": dict(_names)})
 
 
-def _fetch_live_prices(symbols: list[str], max_workers: int = 25) -> dict[str, tuple[float | None, float | None]]:
-    """Fetch real-time (last_price, previous_close) for each symbol via fast_info.
-    Returns {sym: (last_price, previous_close)}.
-    Using fast_info for both values ensures daily% matches Yahoo Finance exactly
-    and avoids the batch-download NaN-close bug for less-liquid ETFs."""
-    def _get(sym: str) -> tuple[str, float | None, float | None]:
+def _fetch_live_prices(symbols: list[str], max_workers: int = 25) -> dict[str, float | None]:
+    """Fetch real-time last_price for each symbol via fast_info in parallel.
+    Returns {sym: last_price}.  Avoids yfinance batch-download NaN-close bug."""
+    def _get(sym: str) -> tuple[str, float | None]:
         try:
-            fi = yf.Ticker(sym.upper()).fast_info
-            return sym, _safe_val(fi.last_price), _safe_val(fi.previous_close)
+            return sym, _safe_val(yf.Ticker(sym.upper()).fast_info.last_price)
         except Exception:
-            return sym, None, None
+            return sym, None
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        return {sym: (lp, pc) for sym, lp, pc in pool.map(_get, symbols)}
+        return dict(pool.map(_get, symbols))
+
+
+def _resolve_prev_close(current: float, closes: pd.Series) -> float:
+    """Return the correct previous close to use as the daily-% denominator.
+    • current ≈ closes[-1] within 0.5%: same trading day — step back one bar
+      so daily% shows the last completed session's change instead of 0%.
+    • current differs >0.5%: fast_info has a newer price than the batch
+      download (data-lag ETFs like MARS, JEDI) — use closes[-1] as baseline
+      so daily% reflects the actual move from the last known close."""
+    last = float(closes.iloc[-1])
+    if last and abs(current - last) / last < 0.005:
+        return float(closes.iloc[-2])
+    return last
 
 
 def _fetch_etf_performance() -> dict:
@@ -720,16 +730,15 @@ def _fetch_etf_performance() -> dict:
     for etf in ALL_ETFS:
         try:
             closes  = data[etf.upper()]["Close"].dropna()
-            if closes.empty:
+            if len(closes) < 2:
                 continue
-            first          = float(closes.iloc[0])
-            current, prev  = live.get(etf, (None, None))
-            current        = current or float(closes.iloc[-1])
-            prev           = prev    or float(closes.iloc[-1])
+            first   = float(closes.iloc[0])
+            current = live.get(etf) or float(closes.iloc[-1])
+            prev    = _resolve_prev_close(current, closes)
             result[etf].update({
                 "price": round(current, 2),
                 "ytd":   round((current - first) / first * 100, 2),
-                "daily": round((current - prev) / current * 100, 2) if current else None,
+                "daily": round((current - prev)  / prev  * 100, 2),
             })
         except Exception:
             pass
@@ -777,17 +786,17 @@ def api_prices():
         cols = set(data.columns.get_level_values(0))
 
         for ticker in tickers:
-            current, prev = live.get(ticker, (None, None))
+            current = live.get(ticker)
             if current is None:
                 continue
             closes = data[ticker]["Close"].dropna() if ticker in cols else pd.Series(dtype=float)
-            if len(closes) < 20:
+            if len(closes) < 2:
                 continue
-            prev = prev or float(closes.iloc[-1])
+            prev = _resolve_prev_close(current, closes)
             prices[ticker] = {
                 "price":  round(current, 2),
                 "change": round(current - prev, 2),
-                "pct":    round((current - prev) / current * 100, 2) if current else 0,
+                "pct":    round((current - prev) / prev * 100, 2) if prev else 0,
                 "ma20":   round(float(closes.iloc[-20:].mean()), 2) if len(closes) >= 20 else None,
                 "ma50":   round(float(closes.iloc[-50:].mean()), 2) if len(closes) >= 50 else None,
             }
