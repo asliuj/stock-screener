@@ -717,24 +717,52 @@ def _fetch_etf_performance() -> dict:
             etf_key, er = fut.result()
             result[etf_key]["expense_ratio"] = er
 
+    # Find the latest date where ≥80% of ETFs have close data — ensures all
+    # ETFs compare the exact same two calendar dates for daily%.
+    etf_upper = [e.upper() for e in ALL_ETFS]
+    threshold = len(etf_upper) * 0.8
+    ref_last = ref_prev = None
+    for i in range(1, min(15, len(data.index))):
+        dt = data.index[-i]
+        coverage = sum(
+            1 for s in etf_upper
+            if s in data.columns.get_level_values(0)
+            and not pd.isna(data[s]["Close"].get(dt))
+        )
+        if coverage >= threshold:
+            if ref_last is None:
+                ref_last = dt
+            else:
+                ref_prev = dt
+                break
+    if ref_last is None or ref_prev is None:
+        ref_last = data.index[-1]
+        ref_prev = data.index[-2]
+
     for etf in ALL_ETFS:
         try:
-            closes = data[etf.upper()]["Close"].dropna()
-            if len(closes) < 2:
+            close_series = data[etf.upper()]["Close"]
+            # First-of-year baseline for YTD
+            first_series = close_series.dropna()
+            if first_series.empty:
                 continue
-            first      = float(closes.iloc[0])
-            last_close = float(closes.iloc[-1])   # last confirmed EOD close
-            prev_close = float(closes.iloc[-2])   # close before that
-            current    = live_prices.get(etf) or last_close
+            first   = float(first_series.iloc[0])
+            current = live_prices.get(etf) or float(first_series.iloc[-1])
+
+            # Daily%: look up the two reference dates directly so every ETF
+            # compares the exact same calendar dates.
+            last_val = close_series.get(ref_last)
+            prev_val = close_series.get(ref_prev)
+            daily = None
+            if last_val is not None and prev_val is not None:
+                lc, pc = float(last_val), float(prev_val)
+                if not (pd.isna(lc) or pd.isna(pc)) and pc:
+                    daily = round((lc - pc) / pc * 100, 2)
 
             result[etf].update({
-                # price: real-time from fast_info
                 "price": round(current, 2),
-                # ytd: real-time price vs first close of year
                 "ytd":   round((current - first) / first * 100, 2),
-                # daily: last two confirmed closes — avoids 0% when market
-                # hasn't opened yet (fast_info returns yesterday's close)
-                "daily": round((last_close - prev_close) / prev_close * 100, 2),
+                "daily": daily,
             })
         except Exception:
             pass
