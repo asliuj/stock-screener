@@ -682,28 +682,19 @@ def api_holdings_data():
         return jsonify({"tickers": dict(_holdings), "weights": dict(_weights), "names": dict(_names)})
 
 
-def _fetch_live_prices(symbols: list[str], max_workers: int = 25) -> dict[str, float | None]:
-    """Fetch real-time last_price for each symbol via fast_info in parallel.
-    Returns {sym_lower: price}.  Avoids yfinance batch-download NaN-close bug."""
-    def _get(sym: str) -> tuple[str, float | None]:
+def _fetch_live_prices(symbols: list[str], max_workers: int = 25) -> dict[str, tuple[float | None, float | None]]:
+    """Fetch real-time (last_price, previous_close) for each symbol via fast_info.
+    Returns {sym: (last_price, previous_close)}.
+    Using fast_info for both values ensures daily% matches Yahoo Finance exactly
+    and avoids the batch-download NaN-close bug for less-liquid ETFs."""
+    def _get(sym: str) -> tuple[str, float | None, float | None]:
         try:
-            return sym, _safe_val(yf.Ticker(sym.upper()).fast_info.last_price)
+            fi = yf.Ticker(sym.upper()).fast_info
+            return sym, _safe_val(fi.last_price), _safe_val(fi.previous_close)
         except Exception:
-            return sym, None
+            return sym, None, None
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        return dict(pool.map(_get, symbols))
-
-
-def _resolve_prev_close(current: float, closes: pd.Series) -> float:
-    """Return the correct previous close for daily-% calculation.
-    • current ≈ closes[-1] (within 0.5%): fast_info and download are on the
-      same day — step back one more bar to avoid showing 0%.
-    • current differs > 0.5%: fast_info has a newer day than the download
-      (batch NaN-close lag) — use closes[-1] as the baseline."""
-    last = float(closes.iloc[-1])
-    if last and abs(current - last) / last < 0.005:
-        return float(closes.iloc[-2])
-    return last
+        return {sym: (lp, pc) for sym, lp, pc in pool.map(_get, symbols)}
 
 
 def _fetch_etf_performance() -> dict:
@@ -711,8 +702,8 @@ def _fetch_etf_performance() -> dict:
     symbols = [e.upper() for e in ALL_ETFS]
     result  = {e: {"ytd": None, "daily": None, "price": None, "expense_ratio": None} for e in ALL_ETFS}
 
-    data        = _yf_download(symbols, start=f"{datetime.now().year}-01-01")
-    live_prices = _fetch_live_prices(ALL_ETFS, max_workers=10)
+    data      = _yf_download(symbols, start=f"{datetime.now().year}-01-01")
+    live      = _fetch_live_prices(ALL_ETFS, max_workers=10)
 
     def _get_expense_ratio(sym_lower: str) -> tuple[str, float | None]:
         try:
@@ -729,15 +720,16 @@ def _fetch_etf_performance() -> dict:
     for etf in ALL_ETFS:
         try:
             closes  = data[etf.upper()]["Close"].dropna()
-            if len(closes) < 2:
+            if closes.empty:
                 continue
-            first   = float(closes.iloc[0])
-            current = live_prices.get(etf) or float(closes.iloc[-1])
-            prev    = _resolve_prev_close(current, closes)
+            first          = float(closes.iloc[0])
+            current, prev  = live.get(etf, (None, None))
+            current        = current or float(closes.iloc[-1])
+            prev           = prev    or float(closes.iloc[-1])
             result[etf].update({
                 "price": round(current, 2),
                 "ytd":   round((current - first) / first * 100, 2),
-                "daily": round((current - prev)  / prev  * 100, 2),
+                "daily": round((current - prev)  / prev  * 100, 2) if prev else None,
             })
         except Exception:
             pass
@@ -785,13 +777,13 @@ def api_prices():
         cols = set(data.columns.get_level_values(0))
 
         for ticker in tickers:
-            current = live.get(ticker)
+            current, prev = live.get(ticker, (None, None))
             if current is None:
                 continue
             closes = data[ticker]["Close"].dropna() if ticker in cols else pd.Series(dtype=float)
-            if len(closes) < 2:
+            if len(closes) < 20:
                 continue
-            prev = _resolve_prev_close(current, closes)
+            prev = prev or float(closes.iloc[-1])
             prices[ticker] = {
                 "price":  round(current, 2),
                 "change": round(current - prev, 2),
