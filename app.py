@@ -683,13 +683,16 @@ def api_holdings_data():
 
 
 def _fetch_live_prices(symbols: list[str], max_workers: int = 25) -> dict[str, tuple[float | None, float | None]]:
-    """Fetch (last_price, previous_close) for each symbol via fast_info in parallel.
-    Returns {sym: (current_price, prior_day_close)}.
-    Formula: daily% = (last_price - previous_close) / previous_close."""
+    """Fetch (last_price, previous_close) for each symbol in parallel.
+    Uses fast_info for last_price and info['previousClose'] for the prior-day
+    close — info['previousClose'] matches Yahoo Finance's website exactly."""
     def _get(sym: str) -> tuple[str, float | None, float | None]:
         try:
-            fi = yf.Ticker(sym.upper()).fast_info
-            return sym, _safe_val(fi.last_price), _safe_val(fi.previous_close)
+            tkr  = yf.Ticker(sym.upper())
+            lp   = _safe_val(tkr.fast_info.last_price)
+            info = tkr.info or {}
+            pc   = _safe_val(info.get("previousClose") or info.get("regularMarketPreviousClose"))
+            return sym, lp, pc
         except Exception:
             return sym, None, None
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
