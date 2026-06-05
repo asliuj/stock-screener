@@ -1806,21 +1806,30 @@
     document.getElementById('summary-regen-btn').style.display = 'none';
     document.getElementById('news-modal').classList.remove('hidden');
 
-    // Kick off all 3 fetches in parallel — summary is independent
+    // Kick off all fetches in parallel — summary is independent
     const t0 = Date.now();
-    const [newsRes, priceRes] = await Promise.all([
+    const [newsRes, priceRes, extRes] = await Promise.all([
       fetch(`/api/news/${encodeURIComponent(ticker)}`),
       fetch('/api/prices', { method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ tickers: [ticker] }) }),
+      fetch(`/api/extended/${encodeURIComponent(ticker)}`),
     ]);
     _fetchSummary(ticker, t0);   // fire-and-forget
 
     try {
       const data   = await newsRes.json();
       const prices = await priceRes.json();
+      const ext    = await extRes.json().catch(() => ({}));
 
       const d = prices[ticker];
-      if (d) _renderPriceBar(document.getElementById('news-price-bar'), d);
+      if (d) {
+        if (ext.previous_close) {
+          const chg = d.price - ext.previous_close;
+          d.change = Math.round(chg * 100) / 100;
+          d.pct    = Math.round(chg / ext.previous_close * 10000) / 100;
+        }
+        _renderPriceBar(document.getElementById('news-price-bar'), d);
+      }
 
       const dot = `<span style="color:var(--muted)">·</span>`;
       document.getElementById('news-sa-links').innerHTML = [
@@ -2024,9 +2033,17 @@
       const titleEl = document.getElementById('intel-modal-title');
       titleEl.textContent = data.name ? `📊 ${ticker} · ${data.name}` : `📊 ${ticker} — Market Intel`;
 
-      // Price bar
+      // Price bar — override change/pct with info['previousClose'] from
+      // api/extended, which matches Yahoo Finance exactly (fast_info can differ)
       const p = prices[ticker];
-      if (p) _renderPriceBar(document.getElementById('intel-price-bar'), p);
+      if (p) {
+        if (data.previous_close) {
+          const chg = p.price - data.previous_close;
+          p.change = Math.round(chg * 100) / 100;
+          p.pct    = Math.round(chg / data.previous_close * 10000) / 100;
+        }
+        _renderPriceBar(document.getElementById('intel-price-bar'), p);
+      }
       let html = '';
 
       // After-hours / pre-market

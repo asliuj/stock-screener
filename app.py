@@ -1082,7 +1082,8 @@ def api_extended(ticker):
             log.warning(f"tkr.info failed for {ticker}: {e}")
             info = {}
 
-        out["name"] = info.get("longName") or info.get("shortName") or ""
+        out["name"]           = info.get("longName") or info.get("shortName") or ""
+        out["previous_close"] = _safe_val(info.get("previousClose") or info.get("regularMarketPreviousClose"))
 
         last = (_safe_val(getattr(fi, "last_price", None))
                 or _safe_val(info.get("regularMarketPrice")) or 0)
