@@ -1292,6 +1292,7 @@
     { id: 'vanguard',  label: 'Vanguard',              etfs: ['vgt','vfh','vht','vde','vis','vcr','vdc','vpu','vnq','vaw','vox'] },
     { id: 'rag',       label: 'RAG — AI & Tech',       etfs: ['chat','igpt','arty','aiq'] },
     { id: 'quantum',   label: 'Quantum',               etfs: ['qtum','wqtm','chpx'] },
+    { id: 'rocket',    label: 'Rocket Companies',      etfs: ['orbx','arkx','jedi','ufo','mars','arkv','xovr'] },
   ];
   const ETF_NAMES = {
     dia:  'Dow Jones Industrial Average',
@@ -1345,6 +1346,13 @@
     qtum: 'Defiance Quantum ETF',
     wqtm: 'Innovator Quantum Computing Accelerated ETF',
     chpx: 'Defiance Chips & Quantum Computing ETF',
+    orbx: 'Themes Space Exploration ETF',
+    arkx: 'ARK Space Exploration & Innovation ETF',
+    jedi: 'Roundhill Space ETF',
+    ufo:  'Procure Space ETF',
+    mars: 'Themes Space ETF',
+    arkv: 'ARK Venture Fund',
+    xovr: 'CrossOver Shares ETF',
   };
 
   // ── Holdings summary modal ────────────────────────────────────────
@@ -1477,7 +1485,7 @@
   function initGroupCheckboxes() {
     // Generate ETF group checkboxes from data
     document.getElementById('etf-groups-container').innerHTML = ETF_GROUPS.map(g => `
-      ${g.id === 'defense' || g.id === 'blackrock' || g.id === 'rag' || g.id === 'quantum' ? '<div style="flex-basis:100%;height:0"></div>' : ''}
+      ${g.id === 'defense' || g.id === 'blackrock' || g.id === 'rag' || g.id === 'quantum' || g.id === 'rocket' ? '<div style="flex-basis:100%;height:0"></div>' : ''}
       <div class="etf-group">
         <div class="etf-group-header">
           <input type="checkbox" class="etf-group-all" id="grp-${g.id}" checked>

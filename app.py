@@ -62,6 +62,8 @@ ALL_ETFS = [
     "chat", "igpt", "arty", "aiq",
     # Quantum
     "qtum", "wqtm", "chpx",
+    # Rocket Companies
+    "orbx", "arkx", "jedi", "ufo", "mars", "arkv", "xovr",
 ]
 HOLDINGS_CACHE_FILE = os.path.join(os.path.dirname(__file__), "holdings_cache.json")
 _ALL_ETFS_SET = frozenset(ALL_ETFS)   # O(1) membership test
@@ -744,24 +746,44 @@ def api_prices():
 
     prices = {}
     try:
-        data = _yf_download(tickers, period="3mo", interval="1d")
-        for ticker in tickers:
+        # fast_info gives the real current price (yfinance download() can return
+        # NaN for the most recent close even on days the market was open).
+        # Batch download is kept solely for MA20/MA50 history.
+        today    = datetime.now()
+        end_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        start    = (today - timedelta(days=100)).strftime("%Y-%m-%d")
+
+        def _get_fast(ticker: str) -> tuple[str, float | None]:
             try:
-                if ticker not in data.columns.get_level_values(0):
-                    continue
-                closes = data[ticker]["Close"].dropna()
-                if len(closes) < 2:
-                    continue
-                last, prev = float(closes.iloc[-1]), float(closes.iloc[-2])
-                prices[ticker] = {
-                    "price":  round(last, 2),
-                    "change": round(last - prev, 2),
-                    "pct":    round((last - prev) / prev * 100, 2) if prev else 0,
-                    "ma20":   round(float(closes.iloc[-20:].mean()), 2) if len(closes) >= 20 else None,
-                    "ma50":   round(float(closes.iloc[-50:].mean()), 2) if len(closes) >= 50 else None,
-                }
+                return ticker, _safe_val(yf.Ticker(ticker).fast_info.last_price)
             except Exception:
-                pass
+                return ticker, None
+
+        with ThreadPoolExecutor(max_workers=25) as pool:
+            fast_results = list(pool.map(_get_fast, tickers))
+
+        fast_map: dict[str, float | None] = {t: p for t, p in fast_results}
+
+        data = _yf_download(tickers, start=start, end=end_date, interval="1d")
+        ma_cols = set(data.columns.get_level_values(0))
+
+        for ticker in tickers:
+            last = fast_map.get(ticker)
+            if last is None:
+                continue
+            closes = data[ticker]["Close"].dropna() if ticker in ma_cols else pd.Series(dtype=float)
+            # Use the last confirmed daily close from download() as the prev price
+            # so % change is close-to-current (consistent with financial sites).
+            # fast_info.previous_close can be unreliable when yfinance has NaN
+            # close data for recent trading days.
+            prev = float(closes.iloc[-1]) if len(closes) >= 1 else None
+            prices[ticker] = {
+                "price":  round(last, 2),
+                "change": round(last - prev, 2) if prev else 0,
+                "pct":    round((last - prev) / prev * 100, 2) if prev else 0,
+                "ma20":   round(float(closes.iloc[-20:].mean()), 2) if len(closes) >= 20 else None,
+                "ma50":   round(float(closes.iloc[-50:].mean()), 2) if len(closes) >= 50 else None,
+            }
     except Exception as e:
         log.warning(f"Price fetch failed: {e}")
     return jsonify(prices)
