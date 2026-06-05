@@ -720,16 +720,21 @@ def _fetch_etf_performance() -> dict:
     for etf in ALL_ETFS:
         try:
             closes = data[etf.upper()]["Close"].dropna()
-            if len(closes) < 1:
+            if len(closes) < 2:
                 continue
-            first = float(closes.iloc[0])
-            # last confirmed close from download → baseline for daily%
-            last_close = float(closes.iloc[-1])
-            current = live_prices.get(etf) or last_close
+            first      = float(closes.iloc[0])
+            last_close = float(closes.iloc[-1])   # last confirmed EOD close
+            prev_close = float(closes.iloc[-2])   # close before that
+            current    = live_prices.get(etf) or last_close
+
             result[etf].update({
-                "ytd":   round((current - first)      / first      * 100, 2),
-                "daily": round((current - last_close) / last_close * 100, 2),
+                # price: real-time from fast_info
                 "price": round(current, 2),
+                # ytd: real-time price vs first close of year
+                "ytd":   round((current - first) / first * 100, 2),
+                # daily: last two confirmed closes — avoids 0% when market
+                # hasn't opened yet (fast_info returns yesterday's close)
+                "daily": round((last_close - prev_close) / prev_close * 100, 2),
             })
         except Exception:
             pass
@@ -788,19 +793,18 @@ def api_prices():
         ma_cols = set(data.columns.get_level_values(0))
 
         for ticker in tickers:
-            last = fast_map.get(ticker)
-            if last is None:
+            current = fast_map.get(ticker)
+            if current is None:
                 continue
             closes = data[ticker]["Close"].dropna() if ticker in ma_cols else pd.Series(dtype=float)
-            # Use the last confirmed daily close from download() as the prev price
-            # so % change is close-to-current (consistent with financial sites).
-            # fast_info.previous_close can be unreliable when yfinance has NaN
-            # close data for recent trading days.
-            prev = float(closes.iloc[-1]) if len(closes) >= 1 else None
+            if len(closes) < 2:
+                continue
+            last_close = float(closes.iloc[-1])
+            prev_close = float(closes.iloc[-2])
             prices[ticker] = {
-                "price":  round(last, 2),
-                "change": round(last - prev, 2) if prev else 0,
-                "pct":    round((last - prev) / prev * 100, 2) if prev else 0,
+                "price":  round(current, 2),
+                "change": round(last_close - prev_close, 2),
+                "pct":    round((last_close - prev_close) / prev_close * 100, 2) if prev_close else 0,
                 "ma20":   round(float(closes.iloc[-20:].mean()), 2) if len(closes) >= 20 else None,
                 "ma50":   round(float(closes.iloc[-50:].mean()), 2) if len(closes) >= 50 else None,
             }
