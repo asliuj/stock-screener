@@ -686,19 +686,17 @@ def _fetch_etf_performance() -> dict:
     """Download YTD price data for all ETFs; return ytd%, daily%, price, and expense_ratio."""
     symbols = [e.upper() for e in ALL_ETFS]
     result  = {e: {"ytd": None, "daily": None, "price": None, "expense_ratio": None} for e in ALL_ETFS}
+
+    # YTD download provides the first-of-year close for ytd% baseline.
+    # fast_info provides real-time price — avoids yfinance NaN-close bug on
+    # recent trading days that causes stale price/daily% in the download.
     data = _yf_download(symbols, start=f"{datetime.now().year}-01-01")
-    for etf in ALL_ETFS:
+
+    def _get_fast_price(sym_lower: str) -> tuple[str, float | None]:
         try:
-            closes = data[etf.upper()]["Close"].dropna()
-            if len(closes) >= 2:
-                first, prev, last = float(closes.iloc[0]), float(closes.iloc[-2]), float(closes.iloc[-1])
-                result[etf].update({
-                    "ytd":   round((last - first) / first * 100, 2),
-                    "daily": round((last - prev)  / prev  * 100, 2),
-                    "price": round(last, 2),
-                })
+            return sym_lower, _safe_val(yf.Ticker(sym_lower.upper()).fast_info.last_price)
         except Exception:
-            pass
+            return sym_lower, None
 
     def _get_expense_ratio(sym_lower: str) -> tuple[str, float | None]:
         try:
@@ -709,10 +707,32 @@ def _fetch_etf_performance() -> dict:
             return sym_lower, None
 
     with ThreadPoolExecutor(max_workers=10) as pool:
-        futures = {pool.submit(_get_expense_ratio, e): e for e in ALL_ETFS}
-        for fut in as_completed(futures):
+        price_futs = {pool.submit(_get_fast_price, e): e for e in ALL_ETFS}
+        er_futs    = {pool.submit(_get_expense_ratio, e): e for e in ALL_ETFS}
+        live_prices: dict[str, float | None] = {}
+        for fut in as_completed(price_futs):
+            sym, px = fut.result()
+            live_prices[sym] = px
+        for fut in as_completed(er_futs):
             etf_key, er = fut.result()
             result[etf_key]["expense_ratio"] = er
+
+    for etf in ALL_ETFS:
+        try:
+            closes = data[etf.upper()]["Close"].dropna()
+            if len(closes) < 1:
+                continue
+            first = float(closes.iloc[0])
+            # last confirmed close from download → baseline for daily%
+            last_close = float(closes.iloc[-1])
+            current = live_prices.get(etf) or last_close
+            result[etf].update({
+                "ytd":   round((current - first)      / first      * 100, 2),
+                "daily": round((current - last_close) / last_close * 100, 2),
+                "price": round(current, 2),
+            })
+        except Exception:
+            pass
 
     return result
 
