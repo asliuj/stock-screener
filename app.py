@@ -682,21 +682,37 @@ def api_holdings_data():
         return jsonify({"tickers": dict(_holdings), "weights": dict(_weights), "names": dict(_names)})
 
 
+def _fetch_live_prices(symbols: list[str], max_workers: int = 25) -> dict[str, float | None]:
+    """Fetch real-time last_price for each symbol via fast_info in parallel.
+    Returns {sym_lower: price}.  Avoids yfinance batch-download NaN-close bug."""
+    def _get(sym: str) -> tuple[str, float | None]:
+        try:
+            return sym, _safe_val(yf.Ticker(sym.upper()).fast_info.last_price)
+        except Exception:
+            return sym, None
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        return dict(pool.map(_get, symbols))
+
+
+def _resolve_prev_close(current: float, closes: pd.Series) -> float:
+    """Return the correct previous close for daily-% calculation.
+    • current ≈ closes[-1] (within 0.5%): fast_info and download are on the
+      same day — step back one more bar to avoid showing 0%.
+    • current differs > 0.5%: fast_info has a newer day than the download
+      (batch NaN-close lag) — use closes[-1] as the baseline."""
+    last = float(closes.iloc[-1])
+    if last and abs(current - last) / last < 0.005:
+        return float(closes.iloc[-2])
+    return last
+
+
 def _fetch_etf_performance() -> dict:
     """Download YTD price data for all ETFs; return ytd%, daily%, price, and expense_ratio."""
     symbols = [e.upper() for e in ALL_ETFS]
     result  = {e: {"ytd": None, "daily": None, "price": None, "expense_ratio": None} for e in ALL_ETFS}
 
-    # YTD download provides the first-of-year close for ytd% baseline.
-    # fast_info provides real-time price — avoids yfinance NaN-close bug on
-    # recent trading days that causes stale price/daily% in the download.
-    data = _yf_download(symbols, start=f"{datetime.now().year}-01-01")
-
-    def _get_fast_price(sym_lower: str) -> tuple[str, float | None]:
-        try:
-            return sym_lower, _safe_val(yf.Ticker(sym_lower.upper()).fast_info.last_price)
-        except Exception:
-            return sym_lower, None
+    data        = _yf_download(symbols, start=f"{datetime.now().year}-01-01")
+    live_prices = _fetch_live_prices(ALL_ETFS, max_workers=10)
 
     def _get_expense_ratio(sym_lower: str) -> tuple[str, float | None]:
         try:
@@ -707,42 +723,21 @@ def _fetch_etf_performance() -> dict:
             return sym_lower, None
 
     with ThreadPoolExecutor(max_workers=10) as pool:
-        price_futs = {pool.submit(_get_fast_price, e): e for e in ALL_ETFS}
-        er_futs    = {pool.submit(_get_expense_ratio, e): e for e in ALL_ETFS}
-        live_prices: dict[str, float | None] = {}
-        for fut in as_completed(price_futs):
-            sym, px = fut.result()
-            live_prices[sym] = px
-        for fut in as_completed(er_futs):
-            etf_key, er = fut.result()
-            result[etf_key]["expense_ratio"] = er
+        for sym, er in pool.map(_get_expense_ratio, ALL_ETFS):
+            result[sym]["expense_ratio"] = er
 
     for etf in ALL_ETFS:
         try:
-            closes = data[etf.upper()]["Close"].dropna()
+            closes  = data[etf.upper()]["Close"].dropna()
             if len(closes) < 2:
                 continue
-            first         = float(closes.iloc[0])
-            last_dl_close = float(closes.iloc[-1])   # last confirmed batch-download close
-            prev_dl_close = float(closes.iloc[-2])   # close before that
-            current       = live_prices.get(etf) or last_dl_close
-
-            # Daily%: compare fast_info price against the right baseline.
-            # • If fast_info ≈ last_dl_close (within 0.5%) → they represent the
-            #   same trading day; use the day before (prev_dl_close) so we show
-            #   the last completed session's change, not 0%.
-            # • If fast_info > 0.5% from last_dl_close → fast_info has newer data
-            #   than the batch download (common for less-liquid ETFs); use
-            #   last_dl_close as the baseline for a proper close-to-current change.
-            if last_dl_close and abs(current - last_dl_close) / last_dl_close < 0.005:
-                daily_prev = prev_dl_close
-            else:
-                daily_prev = last_dl_close
-
+            first   = float(closes.iloc[0])
+            current = live_prices.get(etf) or float(closes.iloc[-1])
+            prev    = _resolve_prev_close(current, closes)
             result[etf].update({
                 "price": round(current, 2),
-                "ytd":   round((current - first)      / first      * 100, 2),
-                "daily": round((current - daily_prev) / daily_prev * 100, 2),
+                "ytd":   round((current - first) / first * 100, 2),
+                "daily": round((current - prev)  / prev  * 100, 2),
             })
         except Exception:
             pass
@@ -779,40 +774,28 @@ def api_prices():
 
     prices = {}
     try:
-        # fast_info gives the real current price (yfinance download() can return
-        # NaN for the most recent close even on days the market was open).
-        # Batch download is kept solely for MA20/MA50 history.
-        today    = datetime.now()
-        end_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
-        start    = (today - timedelta(days=100)).strftime("%Y-%m-%d")
-
-        def _get_fast(ticker: str) -> tuple[str, float | None]:
-            try:
-                return ticker, _safe_val(yf.Ticker(ticker).fast_info.last_price)
-            except Exception:
-                return ticker, None
-
-        with ThreadPoolExecutor(max_workers=25) as pool:
-            fast_results = list(pool.map(_get_fast, tickers))
-
-        fast_map: dict[str, float | None] = {t: p for t, p in fast_results}
-
-        data = _yf_download(tickers, start=start, end=end_date, interval="1d")
-        ma_cols = set(data.columns.get_level_values(0))
+        now  = datetime.now()
+        data = _yf_download(
+            tickers,
+            start=(now - timedelta(days=100)).strftime("%Y-%m-%d"),
+            end=(now + timedelta(days=1)).strftime("%Y-%m-%d"),
+            interval="1d",
+        )
+        live = _fetch_live_prices(tickers)
+        cols = set(data.columns.get_level_values(0))
 
         for ticker in tickers:
-            current = fast_map.get(ticker)
+            current = live.get(ticker)
             if current is None:
                 continue
-            closes = data[ticker]["Close"].dropna() if ticker in ma_cols else pd.Series(dtype=float)
+            closes = data[ticker]["Close"].dropna() if ticker in cols else pd.Series(dtype=float)
             if len(closes) < 2:
                 continue
-            last_close = float(closes.iloc[-1])
-            prev_close = float(closes.iloc[-2])
+            prev = _resolve_prev_close(current, closes)
             prices[ticker] = {
                 "price":  round(current, 2),
-                "change": round(last_close - prev_close, 2),
-                "pct":    round((last_close - prev_close) / prev_close * 100, 2) if prev_close else 0,
+                "change": round(current - prev, 2),
+                "pct":    round((current - prev) / prev * 100, 2) if prev else 0,
                 "ma20":   round(float(closes.iloc[-20:].mean()), 2) if len(closes) >= 20 else None,
                 "ma50":   round(float(closes.iloc[-50:].mean()), 2) if len(closes) >= 50 else None,
             }
