@@ -701,37 +701,40 @@ def _fetch_etf_performance() -> dict:
     symbols = [e.upper() for e in ALL_ETFS]
     result  = {e: {"ytd": None, "daily": None, "price": None, "expense_ratio": None} for e in ALL_ETFS}
 
-    data      = _yf_download(symbols, start=f"{datetime.now().year}-01-01")
-    live      = _fetch_live_prices(ALL_ETFS, max_workers=10)
+    data = _yf_download(symbols, start=f"{datetime.now().year}-01-01")
 
-    def _get_expense_ratio(sym_lower: str) -> tuple[str, float | None]:
+    def _get_info(sym_lower: str) -> tuple[str, float | None, float | None, float | None]:
+        """Fetch current price, official previousClose, and expense ratio in one info call.
+        info['previousClose'] matches Yahoo Finance's website exactly."""
         try:
-            info = yf.Ticker(sym_lower.upper()).info
-            er = info.get("netExpenseRatio") or info.get("annualReportExpenseRatio") or info.get("expenseRatio")
-            return sym_lower, round(float(er), 4) if er else None
+            tkr  = yf.Ticker(sym_lower.upper())
+            fi   = tkr.fast_info
+            info = tkr.info or {}
+            current  = _safe_val(fi.last_price)
+            prev     = _safe_val(info.get("previousClose") or info.get("regularMarketPreviousClose"))
+            er_raw   = info.get("netExpenseRatio") or info.get("annualReportExpenseRatio") or info.get("expenseRatio")
+            er       = round(float(er_raw), 4) if er_raw else None
+            return sym_lower, current, prev, er
         except Exception:
-            return sym_lower, None
+            return sym_lower, None, None, None
 
     with ThreadPoolExecutor(max_workers=10) as pool:
-        for sym, er in pool.map(_get_expense_ratio, ALL_ETFS):
+        for sym, current, prev, er in pool.map(_get_info, ALL_ETFS):
             result[sym]["expense_ratio"] = er
-
-    for etf in ALL_ETFS:
-        try:
-            closes          = data[etf.upper()]["Close"].dropna()
-            if closes.empty:
-                continue
-            first           = float(closes.iloc[0])
-            current, prev   = live.get(etf, (None, None))
-            current         = current or float(closes.iloc[-1])
-            prev            = prev    or float(closes.iloc[-1])
-            result[etf].update({
-                "price": round(current, 2),
-                "ytd":   round((current - first) / first * 100, 2),
-                "daily": round((current - prev)  / prev  * 100, 2) if prev else None,
-            })
-        except Exception:
-            pass
+            try:
+                closes  = data[sym.upper()]["Close"].dropna()
+                if closes.empty:
+                    continue
+                first   = float(closes.iloc[0])
+                current = current or float(closes.iloc[-1])
+                prev    = prev    or float(closes.iloc[-1])
+                result[sym].update({
+                    "price": round(current, 2),
+                    "ytd":   round((current - first) / first * 100, 2),
+                    "daily": round((current - prev)  / prev  * 100, 2) if prev else None,
+                })
+            except Exception:
+                pass
 
     return result
 
