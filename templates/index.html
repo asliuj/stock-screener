@@ -852,7 +852,10 @@
   <div class="modal">
     <div class="modal-header">
       <span class="modal-title">📋 ETF Holdings Report</span>
-      <button class="modal-close" onclick="closeHoldingsModal()">✕</button>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button id="holdings-refresh-btn" class="header-btn" onclick="refreshHoldingsModal()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:5px 12px;font-size:12px;">↻ Refresh</button>
+        <button class="modal-close" onclick="closeHoldingsModal()">✕</button>
+      </div>
     </div>
     <div class="modal-body">
       <p style="color:var(--muted);font-size:13px;margin-bottom:16px;" id="modal-subtitle"></p>
@@ -1398,6 +1401,30 @@
   }
 
   function closeHoldingsModal() { closeModal('holdings-modal'); }
+
+  async function refreshHoldingsModal() {
+    const btn = document.getElementById('holdings-refresh-btn');
+    btn.textContent = '↻ Refreshing…';
+    btn.disabled = true;
+    try {
+      // bust=1 bypasses the 5-minute server-side perf cache
+      const [statusRes, dataRes, perfRes] = await Promise.all([
+        fetch('/api/holdings'),
+        fetch('/api/holdings/data'),
+        fetch('/api/etf-performance?bust=1'),
+      ]);
+      const status = await statusRes.json();
+      const data   = await dataRes.json();
+      _perfCache   = await perfRes.json();
+      _holdingsCache = data;
+      showHoldingsModal({ ...status, ...data }, _perfCache);
+    } catch(e) {
+      alert('Refresh failed: ' + e.message);
+    } finally {
+      btn.textContent = '↻ Refresh';
+      btn.disabled = false;
+    }
+  }
 
   // Close modals on backdrop click
   [['holdings-modal', closeHoldingsModal], ['browse-modal', closeBrowseModal], ['news-modal', closeNewsModal], ['intel-modal', closeIntelModal]]
