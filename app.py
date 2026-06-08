@@ -313,6 +313,64 @@ def fetch_etf_holdings(symbol: str) -> tuple[list[str], dict[str, float], dict[s
         except Exception as e:
             log.debug(f"QQQ Wikipedia fetch failed: {e}")
 
+    # ── Wikipedia (OEF = S&P 100) ────────────────────────────────────
+    if sym_lower == "oef":
+        try:
+            resp = requests.get("https://en.wikipedia.org/wiki/S%26P_100",
+                                headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+            if resp.status_code == 200:
+                for tbl in pd.read_html(StringIO(resp.text), header=0):
+                    tcol = next((c for c in tbl.columns if str(c).lower() in ("symbol", "ticker")), None)
+                    ncol = next((c for c in tbl.columns
+                                 if any(w in str(c).lower() for w in ("name", "company", "security"))), None)
+                    if tcol and len(tbl) >= 50:
+                        tickers, names = [], {}
+                        for _, row in tbl.iterrows():
+                            t = str(row[tcol]).strip()
+                            if t not in _INVALID_TICKER:
+                                nt = _normalize_ticker(t)
+                                tickers.append(nt)
+                                if ncol:
+                                    n = _safe_name(str(row[ncol]))
+                                    if n:
+                                        names[nt] = n
+                        if len(tickers) >= 50:
+                            _, weights = _fetch_stockanalysis("oef")
+                            log.info(f"Fetched {len(tickers)} holdings from OEF via Wikipedia (S&P 100)"
+                                     + (f" + {len(weights)} weights from stockanalysis.com" if weights else ""))
+                            return tickers, weights, names
+        except Exception as e:
+            log.debug(f"OEF Wikipedia (S&P 100) fetch failed: {e}")
+
+    # ── Wikipedia (IVV = S&P 500) ────────────────────────────────────
+    if sym_lower == "ivv":
+        try:
+            resp = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+                                headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+            if resp.status_code == 200:
+                for tbl in pd.read_html(StringIO(resp.text), header=0):
+                    tcol = next((c for c in tbl.columns if str(c).lower() in ("symbol", "ticker")), None)
+                    ncol = next((c for c in tbl.columns
+                                 if any(w in str(c).lower() for w in ("security", "name", "company"))), None)
+                    if tcol and len(tbl) >= 400:
+                        tickers, names = [], {}
+                        for _, row in tbl.iterrows():
+                            t = str(row[tcol]).strip()
+                            if t not in _INVALID_TICKER:
+                                nt = _normalize_ticker(t)
+                                tickers.append(nt)
+                                if ncol:
+                                    n = _safe_name(str(row[ncol]))
+                                    if n:
+                                        names[nt] = n
+                        if len(tickers) >= 400:
+                            _, weights = _fetch_stockanalysis("ivv")
+                            log.info(f"Fetched {len(tickers)} holdings from IVV via Wikipedia (S&P 500)"
+                                     + (f" + {len(weights)} weights from stockanalysis.com" if weights else ""))
+                            return tickers, weights, names
+        except Exception as e:
+            log.debug(f"IVV Wikipedia (S&P 500) fetch failed: {e}")
+
     # ── stockanalysis.com (top ~25 with weights, free tier) ──────────
     try:
         if not _sa_cache:
