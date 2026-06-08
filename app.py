@@ -54,6 +54,8 @@ ALL_ETFS = [
     "xlv", "xlk", "xlf", "xle", "xar", "xli", "xly", "xlp", "xlu", "xlre", "xlb", "xlc",
     # Defense
     "nato", "ita", "ppa", "shld", "war", "idef", "gcad",
+    # Cybersecurity
+    "cibr", "hack", "bug",
     # Blackrock — iShares
     "ihak", "igv", "iyh", "iye", "iyf", "iyr", "ivv", "iwf", "iwm", "efa",
     # Vanguard

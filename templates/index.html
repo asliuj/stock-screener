@@ -987,7 +987,7 @@
   let pollTimer      = null;
   let _intelTicker   = null;
   let isRunning      = false;
-  let _etfCountMap = null;     // Map<etf, element> built once after checkboxes render
+  let _etfCountMap = null;     // Map<etf, element[]> built once — supports same ETF in multiple groups
   let _holdingsCache = null;   // cached /api/holdings/data payload — refreshed on fresh_fetch
   let _perfCache     = null;   // cached /api/etf-performance payload — 5-min TTL server-side
 
@@ -1290,8 +1290,9 @@
   const ETF_GROUPS = [
     { id: 'overview',  label: 'Stock Market Overview', etfs: ['dia','oef','spy','qqq'] },
     { id: 'spdr',      label: 'State Street — SPDR',   etfs: ['xlv','xlk','xlf','xle','xli','xly','xlp','xlu','xlre','xlb','xlc'] },
-    { id: 'defense',   label: 'Defense',               etfs: ['xar','nato','ita','ppa','shld','war','idef','gcad'] },
-    { id: 'blackrock', label: 'Blackrock — iShares',   etfs: ['ihak','iyh','iye','iyf','iyr','igv','ivv','iwf','iwm','efa'] },
+    { id: 'defense',      label: 'Defense',               etfs: ['xar','nato','ita','ppa','shld','war','idef','gcad'] },
+    { id: 'cybersecurity',label: 'Cybersecurity',         etfs: ['cibr','hack','bug','ihak'] },
+    { id: 'blackrock',    label: 'Blackrock — iShares',   etfs: ['ihak','iyh','iye','iyf','iyr','igv','ivv','iwf','iwm','efa'] },
     { id: 'vanguard',  label: 'Vanguard',              etfs: ['vgt','vfh','vht','vde','vis','vcr','vdc','vpu','vnq','vaw','vox'] },
     { id: 'rag',       label: 'RAG — AI & Tech',       etfs: ['chat','igpt','arty','aiq'] },
     { id: 'quantum',   label: 'Quantum',               etfs: ['qtum','wqtm','chpx'] },
@@ -1356,6 +1357,9 @@
     mars: 'Themes Space ETF',
     arkv: 'ARK Venture Fund',
     xovr: 'CrossOver Shares ETF',
+    cibr: 'First Trust Nasdaq Cybersecurity ETF',
+    hack: 'ETFMG Prime Cyber Security ETF',
+    bug:  'Global X Cybersecurity ETF',
   };
 
   // ── Holdings summary modal ────────────────────────────────────────
@@ -1448,12 +1452,14 @@
     const counts = data.counts || {};
     if (!_etfCountMap) {
       _etfCountMap = new Map();
-      document.querySelectorAll('[id^="etf-count-"]').forEach(el =>
-        _etfCountMap.set(el.id.slice('etf-count-'.length), el));
+      document.querySelectorAll('[id^="etf-count-"]').forEach(el => {
+        const key = el.id.slice('etf-count-'.length);
+        if (!_etfCountMap.has(key)) _etfCountMap.set(key, []);
+        _etfCountMap.get(key).push(el);
+      });
     }
     Object.entries(counts).forEach(([etf, n]) => {
-      const el = _etfCountMap.get(etf);
-      if (el) el.textContent = n;
+      (_etfCountMap.get(etf) || []).forEach(el => el.textContent = n);
     });
   }
 
@@ -1512,7 +1518,7 @@
   function initGroupCheckboxes() {
     // Generate ETF group checkboxes from data
     document.getElementById('etf-groups-container').innerHTML = ETF_GROUPS.map(g => `
-      ${g.id === 'defense' || g.id === 'blackrock' || g.id === 'rag' || g.id === 'quantum' || g.id === 'rocket' ? '<div style="flex-basis:100%;height:0"></div>' : ''}
+      ${g.id === 'defense' || g.id === 'cybersecurity' || g.id === 'blackrock' || g.id === 'rag' || g.id === 'quantum' || g.id === 'rocket' ? '<div style="flex-basis:100%;height:0"></div>' : ''}
       <div class="etf-group">
         <div class="etf-group-header">
           <input type="checkbox" class="etf-group-all" id="grp-${g.id}" checked>
