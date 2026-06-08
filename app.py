@@ -116,6 +116,36 @@ def _normalize_ticker(raw: str) -> str:
 
 _VANGUARD_ETFS = frozenset(e for e in ALL_ETFS if e.startswith("v"))
 
+# Russell 1000 Wikipedia sector/sub-industry filter per iShares ETF.
+# None = use all 1000 stocks; ("sector", X) = GICS Sector match; ("subind", X) = sub-industry contains match.
+_RUSSELL1K_ETF_MAP: dict[str, tuple[str, str] | None] = {
+    "iwf": None,                                      # Russell 1000 Growth ≈ all Russell 1000
+    "iyh": ("sector", "Health Care"),
+    "iyf": ("sector", "Financials"),
+    "iye": ("sector", "Energy"),
+    "iyr": ("sector", "Real Estate"),
+    "igv": ("sector", "Information Technology"),
+    "ita": ("subind", "Aerospace & Defense"),
+}
+
+_r1k_cache: dict = {}   # {"df": DataFrame} — populated on first use, reused across ETF fetches
+
+def _fetch_russell1k():
+    """Fetch and cache the Russell 1000 Wikipedia table (one HTTP request per full refresh)."""
+    if "df" in _r1k_cache:
+        return _r1k_cache["df"]
+    try:
+        resp = requests.get("https://en.wikipedia.org/wiki/Russell_1000_Index",
+                            headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        if resp.status_code == 200:
+            for tbl in pd.read_html(StringIO(resp.text), header=0):
+                if "Symbol" in tbl.columns and len(tbl) > 500:
+                    _r1k_cache["df"] = tbl
+                    return tbl
+    except Exception as e:
+        log.debug(f"Russell 1000 Wikipedia fetch failed: {e}")
+    return None
+
 _ISHARES_PRODUCTS: dict[str, tuple[str, str]] = {
     "oef":  ("239723", "ishares-sp-100-etf"),
     "ivv":  ("239726", "ishares-core-sp-500-etf"),
@@ -370,6 +400,41 @@ def fetch_etf_holdings(symbol: str) -> tuple[list[str], dict[str, float], dict[s
                             return tickers, weights, names
         except Exception as e:
             log.debug(f"IVV Wikipedia (S&P 500) fetch failed: {e}")
+
+    # ── Wikipedia Russell 1000 (IWF + iShares sector ETFs) ──────────
+    if sym_lower in _RUSSELL1K_ETF_MAP:
+        try:
+            r1k_df = _fetch_russell1k()
+            if r1k_df is not None:
+                filt = _RUSSELL1K_ETF_MAP[sym_lower]
+                if filt is None:
+                    df_filt = r1k_df
+                elif filt[0] == "sector":
+                    df_filt = r1k_df[r1k_df["GICS Sector"] == filt[1]]
+                else:
+                    df_filt = r1k_df[r1k_df["GICS Sub-Industry"].str.contains(filt[1], na=False)]
+                tickers, names = [], {}
+                for _, row in df_filt.iterrows():
+                    t = str(row["Symbol"]).strip()
+                    if t not in _INVALID_TICKER:
+                        nt = _normalize_ticker(t)
+                        tickers.append(nt)
+                        n = _safe_name(str(row.get("Company", "")))
+                        if n:
+                            names[nt] = n
+                if tickers:
+                    # Supplement with stockanalysis.com tickers not already covered
+                    sa_tickers, weights = _fetch_stockanalysis(sym_lower)
+                    seen = set(tickers)
+                    for t in sa_tickers:
+                        if t not in seen:
+                            tickers.append(t)
+                    label = f"sector={filt[1]}" if filt else "all"
+                    log.info(f"Fetched {len(tickers)} holdings from {symbol} via Wikipedia Russell 1000 ({label})"
+                             + (f" + {len(sa_tickers)} SA supplement" if sa_tickers else ""))
+                    return tickers, weights, names
+        except Exception as e:
+            log.debug(f"{symbol} Wikipedia Russell 1000 fetch failed: {e}")
 
     # ── stockanalysis.com (top ~25 with weights, free tier) ──────────
     try:
