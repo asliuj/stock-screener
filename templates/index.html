@@ -919,6 +919,18 @@
           <button class="filter-btn" onclick="applyCustomPctFilter()">Apply</button>
         </div>
       </div>
+      <div class="browse-filter-row" style="margin-top:4px;">
+        <label>Margins (min&nbsp;%):</label>
+        <div class="filter-custom">
+          Gross <input id="mg-gross" type="number" step="1" placeholder="—">%
+          &nbsp;Op <input id="mg-op" type="number" step="1" placeholder="—">%
+          &nbsp;Net <input id="mg-net" type="number" step="1" placeholder="—">%
+          &nbsp;FCF <input id="mg-fcf" type="number" step="1" placeholder="—">%
+          <button class="filter-btn" onclick="applyMarginFilters()">Apply</button>
+          <button class="filter-btn" onclick="clearMarginFilters()">Clear</button>
+          <span id="mg-status" style="margin-left:4px;color:var(--muted);font-size:11px;"></span>
+        </div>
+      </div>
       <div class="browse-grid" id="browse-grid"></div>
       <div id="browse-empty">No tickers match your search.</div>
     </div>
@@ -1546,11 +1558,14 @@
   const yf = t => `https://finance.yahoo.com/quote/${encodeURIComponent(t)}`;
 
   // ── Browse All Holdings modal ─────────────────────────────────────
-  let _browseCards  = [];
-  let _browsePrices = null;
-  let _browseFilter = { min: null, max: null };  // daily % change filter
-  let _ahData       = null;   // after-hours data from /api/afterhours
-  let _ahFilterOnly = false;  // show only AH movers
+  let _browseCards   = [];
+  let _browsePrices  = null;
+  let _browseFilter  = { min: null, max: null };  // daily % change filter
+  let _ahData        = null;   // after-hours data from /api/afterhours
+  let _ahFilterOnly  = false;  // show only AH movers
+  let _browseMargins = null;   // {TICKER: {gross, operating, net, fcf}}
+  let _marginFilter  = { gross: null, operating: null, net: null, fcf: null };
+  let _marginsLoading = false;
 
   const PCT_PRESETS = {
     all:     { min: null, max: null },
@@ -1585,6 +1600,70 @@
     _browseFilter = { min: min !== '' ? parseFloat(min) : null, max: max !== '' ? parseFloat(max) : null };
     _clearFilterBtns();
     filterBrowse(_bq());
+  }
+
+  async function _loadMargins(onDone) {
+    if (_marginsLoading) return;
+    _marginsLoading = true;
+    const statusEl = document.getElementById('mg-status');
+    const total = _browseCards.length;
+    statusEl.textContent = `Loading (${total} stocks)…`;
+    try {
+      const res = await fetch('/api/margins', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickers: _browseCards.map(c => c.ticker) }),
+      });
+      const data = await res.json();
+      _browseMargins = _browseMargins ? Object.assign(_browseMargins, data) : data;
+      statusEl.textContent = 'Margins loaded';
+      if (onDone) onDone();
+    } catch (e) {
+      statusEl.textContent = 'Error loading margins';
+    } finally {
+      _marginsLoading = false;
+    }
+  }
+
+  function applyMarginFilters() {
+    const g  = document.getElementById('mg-gross').value;
+    const op = document.getElementById('mg-op').value;
+    const n  = document.getElementById('mg-net').value;
+    const f  = document.getElementById('mg-fcf').value;
+    _marginFilter = {
+      gross:     g  !== '' ? parseFloat(g)  : null,
+      operating: op !== '' ? parseFloat(op) : null,
+      net:       n  !== '' ? parseFloat(n)  : null,
+      fcf:       f  !== '' ? parseFloat(f)  : null,
+    };
+    const anyActive = Object.values(_marginFilter).some(v => v !== null);
+    if (anyActive && !_browseMargins) {
+      _loadMargins(() => filterBrowse(_bq()));
+    } else {
+      filterBrowse(_bq());
+    }
+  }
+
+  function clearMarginFilters() {
+    _marginFilter = { gross: null, operating: null, net: null, fcf: null };
+    ['mg-gross','mg-op','mg-net','mg-fcf'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('mg-status').textContent = _browseMargins ? 'Margins loaded' : '';
+    filterBrowse(_bq());
+  }
+
+  function applyMarginFilter(cards) {
+    const f = _marginFilter;
+    const anyActive = f.gross !== null || f.operating !== null || f.net !== null || f.fcf !== null;
+    if (!anyActive) return cards;
+    if (!_browseMargins) return cards;  // data not yet loaded — show all
+    return cards.filter(c => {
+      const m = _browseMargins[c.ticker];
+      if (!m) return false;
+      if (f.gross     !== null && (m.gross     === null || m.gross     < f.gross))     return false;
+      if (f.operating !== null && (m.operating === null || m.operating < f.operating)) return false;
+      if (f.net       !== null && (m.net       === null || m.net       < f.net))       return false;
+      if (f.fcf       !== null && (m.fcf       === null || m.fcf       < f.fcf))       return false;
+      return true;
+    });
   }
 
   function applyPctFilter(cards) {
@@ -1653,6 +1732,11 @@
       document.getElementById('filter-pct-max').value = '';
       _clearFilterBtns();
       document.querySelector('.browse-filter-row .filter-btn').classList.add('active-all');
+      // Reset margin filter inputs (keep _browseMargins cache)
+      _marginFilter = { gross: null, operating: null, net: null, fcf: null };
+      _marginsLoading = false;
+      ['mg-gross','mg-op','mg-net','mg-fcf'].forEach(id => { document.getElementById(id).value = ''; });
+      document.getElementById('mg-status').textContent = _browseMargins ? 'Margins loaded' : '';
       document.getElementById('browse-modal').classList.remove('hidden');
       renderBrowseCards(_browseCards);
       document.getElementById('browse-search').focus();
@@ -1697,6 +1781,13 @@
         ? (() => { const { arrow, color } = _chg(d.change); return `<span style="color:var(--text);font-weight:600">$${d.price.toFixed(2)}</span>` + (arrow ? ` <span style="color:${color};font-size:11px">${arrow} ${Math.abs(d.pct).toFixed(2)}%</span>` : ''); })()
         : '…';
       const maHtml = d ? [d.ma20 && `MA20 $${d.ma20.toFixed(2)}`, d.ma50 && `MA50 $${d.ma50.toFixed(2)}`].filter(Boolean).join('  ·  ') : '';
+      const m = _browseMargins && _browseMargins[c.ticker];
+      const marginHtml = m ? [
+        m.gross     != null && `GM ${m.gross.toFixed(1)}%`,
+        m.operating != null && `OM ${m.operating.toFixed(1)}%`,
+        m.net       != null && `NM ${m.net.toFixed(1)}%`,
+        m.fcf       != null && `FCF ${m.fcf.toFixed(1)}%`,
+      ].filter(Boolean).join('  ·  ') : '';
       return `<div class="browse-card" data-ticker="${c.ticker}">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
           <div class="browse-card-ticker"><a href="${yf(c.ticker)}" target="_blank" rel="noopener">${c.ticker}</a></div>
@@ -1705,6 +1796,7 @@
         </div>
         <div class="browse-card-etfs" style="margin-bottom:4px">${badges}</div>
         <div class="browse-ma" style="font-size:11px;color:var(--muted);">${maHtml}</div>
+        ${marginHtml ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">${marginHtml}</div>` : ''}
         ${c.name ? `<div style="font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${c.name}</div>` : ''}
         <div class="browse-card-buttons">
           <button class="browse-card-btn" onclick="openNewsModal('${c.ticker}')">📰 News</button>
@@ -1720,7 +1812,10 @@
   function filterBrowse(q) {
     const term   = q.trim().toUpperCase();
     const byText = term ? _browseCards.filter(c => c.ticker.includes(term)) : _browseCards;
-    renderBrowseCards(_ahFilterOnly ? applyAhFilter(byText) : applyAhFilter(applyPctFilter(byText)));
+    const filtered = _ahFilterOnly
+      ? applyAhFilter(byText)
+      : applyAhFilter(applyMarginFilter(applyPctFilter(byText)));
+    renderBrowseCards(filtered);
     applyAfterHours();
   }
 

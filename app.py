@@ -449,6 +449,53 @@ def _fetch_history_stooq(ticker: str, days: int = 90) -> pd.DataFrame | None:
         return None
 
 
+# ── Margins cache ─────────────────────────────────────────────────────────────
+_margins_cache: dict[str, dict] = {}
+MARGINS_TTL = 86400  # 24 hours
+
+
+def _fetch_margin(ticker: str) -> dict:
+    now = time.time()
+    cached = _margins_cache.get(ticker)
+    if cached and now - cached.get("ts", 0) < MARGINS_TTL:
+        return cached
+    result: dict = {"gross": None, "operating": None, "net": None, "fcf": None, "ts": now}
+    try:
+        info  = yf.Ticker(ticker).info
+        gross = info.get("grossMargins")
+        oper  = info.get("operatingMargins")
+        net   = info.get("profitMargins")
+        fcf_a = info.get("freeCashflow")
+        rev   = info.get("totalRevenue")
+        if gross is not None: result["gross"]     = round(float(gross) * 100, 1)
+        if oper  is not None: result["operating"] = round(float(oper)  * 100, 1)
+        if net   is not None: result["net"]       = round(float(net)   * 100, 1)
+        if fcf_a is not None and rev and rev > 0:
+            result["fcf"] = round(float(fcf_a) / float(rev) * 100, 1)
+    except Exception:
+        pass
+    _margins_cache[ticker] = result
+    return result
+
+
+@app.route("/api/margins", methods=["POST"])
+def api_margins():
+    body    = request.get_json(force=True)
+    tickers = [_normalize_ticker(t.strip().upper())
+               for t in (body.get("tickers") or []) if t.strip()][:300]
+    out: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        fmap = {pool.submit(_fetch_margin, t): t for t in tickers}
+        for fut in as_completed(fmap):
+            t = fmap[fut]
+            try:
+                d = fut.result()
+                out[t] = {k: v for k, v in d.items() if k != "ts"}
+            except Exception:
+                out[t] = {"gross": None, "operating": None, "net": None, "fcf": None}
+    return jsonify(out)
+
+
 def _fetch_pe_cnbc(ticker: str) -> float | None:
     """Fetch trailing P/E ratio from CNBC's free quote API."""
     try:
